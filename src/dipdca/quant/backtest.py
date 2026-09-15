@@ -252,6 +252,17 @@ def run_dip_deployment(
 ) -> tuple[StrategyResult, pd.DataFrame]:
     """Dip-deployment strategy with cumulative deployment targets.
 
+    .. deprecated::
+        Use :func:`run_ath_deployment` for new code.  This function is kept for
+        backward compatibility with existing tests.  Known limitations:
+        - Bug 1: When ``benchmark_data`` is ``None``, silently falls back to ETF
+          prices for ATH / drawdown computation.
+        - Bug 2: ``bm_running_high`` is initialised to 0 and seeded from the first
+          loop observation instead of from the full benchmark history.
+        - Bug 4: When the benchmark gaps across multiple tiers in one close, each
+          tier schedules a separate order (over-deploys).
+        :func:`run_ath_deployment` fixes all three issues.
+
     Monthly savings accumulate in a savings account (earning cash_rate) until
     a configured drawdown threshold is crossed. At each threshold, a configured
     CUMULATIVE fraction of the eligible saved capital is deployed.
@@ -459,6 +470,277 @@ def run_dip_deployment(
     return result, ledger
 
 
+def run_ath_deployment(
+    instrument_data: pd.DataFrame,
+    params: SimulationParams,
+    tiers: list[DeploymentTier],
+    benchmark_data: pd.DataFrame | None,
+    initial_ath: float | None = None,
+    market_def: MarketDefinition | None = None,
+) -> tuple[StrategyResult, pd.DataFrame]:
+    """ATH-based dip deployment strategy.
+
+    Invariants vs run_dip_deployment
+    ---------------------------------
+    1. ``benchmark_data`` is **required** — raises ``ValueError`` if ``None``.
+    2. ATH is seeded BEFORE the loop from ``benchmark_data["adj_close"].max()``
+       (or from the explicit ``initial_ath`` argument), so a simulation that starts
+       mid-bear-market computes drawdowns from the true historical peak.
+    3. Episode resets **only** when the benchmark closes at or above the previous ATH.
+       Recovering above a threshold does NOT rearm a tier.
+    4. When the benchmark gaps across multiple tiers in one close, the engine finds
+       ALL newly-crossed tiers, picks the **deepest** cumulative target, and schedules
+       **one** incremental order — preventing the over-deploy bug.
+    5. There is **no** ``max_wait_months`` force-deployment. Cash is deployed only on
+       threshold crossings.
+
+    Signal source
+    -------------
+    ``benchmark_data["adj_close"]`` drives ATH, drawdown, and threshold crossings.
+    ``instrument_data["adj_close"]`` is used only for execution price and valuation.
+
+    ATH seeding
+    -----------
+    ``initial_ath = benchmark_data["adj_close"].max()`` by default.
+    Pass ``initial_ath`` explicitly when you have a pre-simulation historical ATH
+    that is NOT present in the benchmark data slice you are passing.
+
+    Args:
+        instrument_data: ETF / investable instrument prices (execution + valuation).
+        params: Simulation parameters.
+        tiers: Cumulative deployment tier schedule (validated ascending fractions,
+               descending thresholds).
+        benchmark_data: Required reference index. Must have an ``adj_close`` column.
+            Raises ``ValueError`` when ``None``.
+        initial_ath: Optional explicit ATH seed. If ``None``, computed as
+            ``float(benchmark_data["adj_close"].max())``.
+        market_def: Optional metadata (not used in signal logic; for audit only).
+
+    Returns:
+        Tuple of (StrategyResult, day-by-day ledger DataFrame).
+    """
+    if benchmark_data is None:
+        raise ValueError(
+            "benchmark_data is required for run_ath_deployment. "
+            "Pass the benchmark index DataFrame (e.g. ^NDX for QQQ). "
+            "If the asset has no configured index_symbol, use run_dip_deployment instead."
+        )
+    if "adj_close" not in benchmark_data.columns:
+        raise ValueError("benchmark_data must have an 'adj_close' column")
+    if len(benchmark_data) == 0:
+        raise ValueError("benchmark_data must not be empty")
+    if not tiers:
+        raise ValueError("At least one DeploymentTier is required")
+    DeploymentTier.validate_schedule(tiers)
+
+    ledger = _build_ledger_template(instrument_data)
+    trading_days = list(ledger.index)
+    if not trading_days:
+        raise ValueError("No trading days in instrument_data")
+
+    # Align benchmark to instrument trading calendar (forward-fill across holidays /
+    # different missing-date conventions).
+    bm_aligned: pd.Series = (
+        benchmark_data["adj_close"]
+        .reindex(ledger.index, method="ffill")
+        .ffill()
+    )
+
+    # -----------------------------------------------------------------------
+    # Seed ATH BEFORE the loop — Bug 2 fix.
+    # We use the maximum of the ENTIRE benchmark series passed in (which the
+    # caller should include pre-simulation history).  The in-loop logic then
+    # updates bm_running_high whenever the benchmark closes at a new high.
+    # -----------------------------------------------------------------------
+    if initial_ath is not None:
+        bm_running_high = float(initial_ath)
+    else:
+        bm_running_high = float(benchmark_data["adj_close"].max())
+
+    schedule = build_contribution_schedule(
+        params.start_date,
+        params.end_date,
+        params.monthly_contribution,
+        params.payday,
+        pd.DatetimeIndex(trading_days),
+    )
+    invest_map: dict[pd.Timestamp, float] = {}
+    for _, row in schedule.iterrows():
+        invest_date = row["invest_date"]
+        invest_map[invest_date] = invest_map.get(invest_date, 0.0) + row["amount"]
+
+    cash_rate = params.cash_rate_override if params.cash_rate_override is not None else 0.0
+
+    cash = params.initial_cash_reserve
+    units = 0.0
+    total_fees = 0.0
+    total_interest = 0.0
+    n_deployments = 0
+    cash_flows: list[tuple[date, float]] = []
+
+    # Deploy initial_investment on day 1 (identical to DCA / run_dip_deployment)
+    if params.initial_investment > 0 and trading_days:
+        p0 = float(instrument_data["adj_close"].iloc[0])
+        if p0 > 0:
+            net, cost = _apply_cost(
+                params.initial_investment, params.fixed_fee, params.pct_fee, params.slippage
+            )
+            units = net / p0
+            total_fees += cost
+            n_deployments += 1
+        ledger.at[trading_days[0], "external_flow"] = (
+            _ledger_float(ledger, trading_days[0], "external_flow") + params.initial_investment
+        )
+        ledger.at[trading_days[0], "deployed"] = params.initial_investment
+        cash_flows.append((trading_days[0].date(), -params.initial_investment))
+
+    if params.initial_cash_reserve > 0:
+        ledger.at[trading_days[0], "external_flow"] = (
+            _ledger_float(ledger, trading_days[0], "external_flow") + params.initial_cash_reserve
+        )
+        cash_flows.append((trading_days[0].date(), -params.initial_cash_reserve))
+
+    # Episode state
+    triggered_tiers: set[int] = set()
+    principal_deployed_in_episode = 0.0
+    prev_drawdown = 0.0
+    # Pending: (execute_on_or_after_dt, tier_index, amount)
+    pending_executions: list[tuple[pd.Timestamp, int, float]] = []
+
+    prev_dt: pd.Timestamp | None = None
+    for i, dt in enumerate(trading_days):
+        # Instrument price (execution and valuation only)
+        p = _ledger_float(ledger, dt, "price")
+        # Benchmark close (signal only)
+        bm_close = float(bm_aligned.iloc[i])
+
+        # 1. Accrue interest on cash
+        if prev_dt is not None and cash > 0 and cash_rate > 0:
+            days_elapsed = (dt - prev_dt).days
+            interest = cash * ((1.0 + cash_rate) ** (days_elapsed / 365.25) - 1.0)
+            cash += interest
+            total_interest += interest
+            ledger.at[dt, "interest"] = interest
+
+        # 2. Receive contributions
+        contrib = invest_map.get(dt, 0.0)
+        if contrib > 0:
+            cash += contrib
+            ledger.at[dt, "external_flow"] = (
+                _ledger_float(ledger, dt, "external_flow") + contrib
+            )
+            cash_flows.append((dt.date(), -contrib))
+
+        # 3. Execute pending trades (signalled at t-1, executed at t using instrument price)
+        deployed_today = 0.0
+        fees_today = 0.0
+        for exec_dt, tier_idx, amount in list(pending_executions):
+            if dt >= exec_dt and p > 0:
+                actual = min(amount, cash)
+                if actual > 0:
+                    net, cost = _apply_cost(actual, params.fixed_fee, params.pct_fee, params.slippage)
+                    units += net / p
+                    cash -= actual
+                    total_fees += cost
+                    n_deployments += 1
+                    deployed_today += actual
+                    fees_today += cost
+                    principal_deployed_in_episode += actual
+                pending_executions.remove((exec_dt, tier_idx, amount))
+
+        if deployed_today > 0:
+            ledger.at[dt, "deployed"] = (
+                _ledger_float(ledger, dt, "deployed") + deployed_today
+            )
+            ledger.at[dt, "fees"] = (
+                _ledger_float(ledger, dt, "fees") + fees_today
+            )
+
+        # 4. Value portfolio using instrument price
+        market_val = units * p
+        ledger.at[dt, "cash"] = cash
+        ledger.at[dt, "units"] = units
+        ledger.at[dt, "market_value"] = market_val
+        ledger.at[dt, "total_wealth"] = cash + market_val
+
+        # 5. Update benchmark ATH and drawdown.
+        #    Episode resets ONLY when benchmark closes at or above the previous ATH.
+        #    Recovering above a threshold does NOT rearm a tier (Bug 3 fix).
+        if bm_close >= bm_running_high:
+            # New ATH: reset episode state
+            bm_running_high = bm_close
+            if triggered_tiers:
+                triggered_tiers = set()
+                principal_deployed_in_episode = 0.0
+            current_dd = 0.0
+        else:
+            current_dd = bm_close / bm_running_high - 1.0
+
+        # Write benchmark audit columns
+        ledger.at[dt, "benchmark_close"] = bm_close
+        ledger.at[dt, "benchmark_ath"] = bm_running_high
+        ledger.at[dt, "benchmark_drawdown"] = current_dd
+
+        # 6. Detect threshold crossings using benchmark drawdown.
+        #    Multi-tier gap fix (Bug 4): collect ALL newly-crossed tiers, pick the
+        #    DEEPEST cumulative target, schedule ONE incremental order.
+        #
+        #    Unlike run_dip_deployment, we allow i=0 to signal a crossing.  When
+        #    initial_ath is seeded from pre-simulation history, prev_drawdown=0.0
+        #    (the "before simulation" reference) and current_dd may already be below
+        #    a threshold on the very first day.  Detecting that crossing on day 0
+        #    schedules execution at day 1 — no look-ahead bias.
+        if True:
+            crossed_tiers = [
+                (j, tier)
+                for j, tier in enumerate(tiers)
+                if j not in triggered_tiers
+                and prev_drawdown > tier.drawdown_threshold >= current_dd
+            ]
+            if crossed_tiers:
+                # Mark ALL crossed tiers as triggered (they are all "consumed")
+                for j, _tier in crossed_tiers:
+                    triggered_tiers.add(j)
+
+                # Use ONLY the deepest (most negative threshold) cumulative target
+                deepest_j, deepest_tier = min(
+                    crossed_tiers, key=lambda jt: jt[1].drawdown_threshold
+                )
+                cumulative_target = deepest_tier.cumulative_deployment_fraction
+                eligible = cash + principal_deployed_in_episode
+                target_total = cumulative_target * eligible
+
+                # Account for already-pending (not yet executed) orders
+                pending_total = sum(amt for _, _, amt in pending_executions)
+                incremental = min(
+                    max(0.0, cash - pending_total),
+                    max(0.0, target_total - principal_deployed_in_episode - pending_total),
+                )
+                if incremental > 0 and i + 1 < len(trading_days):
+                    pending_executions.append((trading_days[i + 1], deepest_j, incremental))
+                ledger.at[dt, "signal_dd"] = current_dd
+
+        prev_drawdown = current_dd
+        prev_dt = dt
+
+    total_contributions = (
+        schedule["amount"].sum() + params.initial_investment + params.initial_cash_reserve
+    )
+    years = (trading_days[-1] - trading_days[0]).days / 365.25
+
+    result = _build_strategy_result(
+        strategy_name="ATH Dip Deployment",
+        ledger=ledger,
+        cash_flows=cash_flows,
+        total_contributions=total_contributions,
+        total_fees=total_fees,
+        total_interest=total_interest,
+        n_deployments=n_deployments,
+        years=years,
+    )
+    return result, ledger
+
+
 def run_dca(
     price_data: pd.DataFrame,
     params: SimulationParams,
@@ -582,6 +864,12 @@ def run_wait_for_dip(
     cash_rate_series: pd.Series | None = None,
 ) -> tuple[StrategyResult, pd.DataFrame]:
     """Wait-for-dip strategy: hold contributions as cash until drawdown threshold met.
+
+    .. deprecated::
+        Use :func:`run_ath_deployment` for new UI code.  Kept for backward
+        compatibility with existing tests.  Known limitation (Bug 3): the episode
+        re-arms when drawdown recovers above the threshold (``signal_dd > threshold``).
+        The correct rule is that only a new benchmark ATH resets the episode.
 
     Episode state machine:
     - episode_armed=True: strategy will trigger on the next threshold crossing.
@@ -783,6 +1071,11 @@ def run_tiered_dip(
     cash_rate_series: pd.Series | None = None,
 ) -> tuple[StrategyResult, pd.DataFrame]:
     """Tiered dip strategy: deploy fixed fractions of the episode cash basis at each tier.
+
+    .. deprecated::
+        Use :func:`run_ath_deployment` for new UI code.  Kept for backward
+        compatibility with existing tests.  Known limitation: uses the investable
+        instrument price (not a benchmark index) for ATH detection.
 
     Episode cash basis semantics:
     - When the first tier of a drawdown episode triggers, record episode_cash_basis = cash.

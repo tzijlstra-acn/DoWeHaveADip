@@ -44,8 +44,9 @@ page_header(
 # Inputs — all in main column (no sidebar)
 # ---------------------------------------------------------------------------
 _assets_cfg = load_assets_config()
-_asset_options = {a["display_name"]: a["etf_symbol"] for a in _assets_cfg}
-_asset_names = list(_asset_options.keys())
+# Map display_name → full asset config dict
+_asset_map = {a["display_name"]: a for a in _assets_cfg}
+_asset_names = list(_asset_map.keys())
 _default_idx = next((i for i, n in enumerate(_asset_names) if "S&P 500" in n), 0)
 
 col_asset, col_monthly, col_cash = st.columns([3, 2, 2])
@@ -67,33 +68,57 @@ with st.expander("Advanced assumptions"):
     with col_a2:
         dip_threshold = st.slider("Dip threshold (%)", min_value=-50, max_value=-1, value=-10, step=1) / 100.0
 
-symbol = _asset_options[selected_name]
+asset_cfg = _asset_map[selected_name]
+etf_symbol = asset_cfg["etf_symbol"]
+index_symbol = asset_cfg.get("index_symbol")
 history_end = date.today()
 
 # ---------------------------------------------------------------------------
-# Load market data
+# Load market data — ETF for valuation, benchmark index for ATH/drawdown signal
 # ---------------------------------------------------------------------------
+svc = get_market_data_service()
+
 with st.spinner(f"Loading {selected_name} data..."):
     try:
-        _result = get_market_data_service().get_history(symbol, history_start, history_end)
-        price_df = _result.frame
+        # Always load the investable instrument (ETF)
+        _inst_result = svc.get_history(etf_symbol, history_start, history_end)
+        price_df = _inst_result.frame
         price_series = price_df["adj_close"].dropna()
+
+        # Load benchmark index for ATH / drawdown display when available
+        if index_symbol is not None:
+            _bm_result = svc.get_history(index_symbol, history_start, history_end)
+            bm_series = _bm_result.frame["adj_close"].dropna()
+            signal_series = bm_series
+            signal_label = index_symbol
+            freshness_caption(_bm_result.freshness)
+        else:
+            signal_series = price_series
+            signal_label = f"{etf_symbol} (ETF proxy — no index configured)"
+            freshness_caption(_inst_result.freshness)
+            st.caption(
+                f"No benchmark index configured for {selected_name}. "
+                "Using ETF price as a proxy for the ATH/drawdown signal. "
+                "Results may differ from the underlying index."
+            )
+
     except LiveDataUnavailable as exc:
         live_data_error(exc, context=selected_name)
         st.stop()
 
-freshness_caption(_result.freshness)
-
-if len(price_series) < 30:
+if len(signal_series) < 30:
     st.error("Not enough data for analysis. Try an earlier history start date.")
     st.stop()
 
-dd_series = drawdown(price_series)
+dd_series = drawdown(signal_series)
 current_dd = float(dd_series.iloc[-1])
 
-# Days since last all-time high
-peak_series = price_series.expanding().max()
-at_peak = price_series >= peak_series
+# Benchmark ATH date
+ath_date = signal_series.idxmax()
+
+# Days since last all-time high (from the benchmark/index series)
+peak_series = signal_series.expanding().max()
+at_peak = signal_series >= peak_series
 days_since_high = 0
 for i in range(len(at_peak) - 1, -1, -1):
     if at_peak.iloc[i]:
@@ -153,6 +178,13 @@ signal_card(
     status_color=hero_color,
 )
 
+# Benchmark source attribution
+ath_date_str = str(ath_date.date()) if hasattr(ath_date, "date") else str(ath_date)
+st.caption(
+    f"Signal source: **{signal_label}** — "
+    f"All-time high: **{signal_series.max():,.2f}** on **{ath_date_str}**"
+)
+
 # ---------------------------------------------------------------------------
 # 3 secondary metrics
 # ---------------------------------------------------------------------------
@@ -181,7 +213,8 @@ st.divider()
 # Drawdown chart
 # ---------------------------------------------------------------------------
 st.subheader("Drawdown history")
-fig_dd = drawdown_chart(price_series, title=f"{selected_name} — Drawdown from High")
+# Use benchmark/index series for the drawdown chart (the true signal source)
+fig_dd = drawdown_chart(signal_series, title=f"{selected_name} — Drawdown from High ({signal_label})")
 st.plotly_chart(fig_dd, width="stretch")
 
 st.divider()
