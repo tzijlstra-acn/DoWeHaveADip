@@ -209,7 +209,7 @@ else:
         chart_label = deploy_labels.get(label_key, f"Deploy {sim.deploy_pct:.0%} of cash")
         n_periods = len([d for d in dd_series.index if abs(float(dd_series.loc[d]) - current_dd) <= 0.05])
         st.caption(f"Based on {n_periods} historical periods — {chart_label}")
-        fig_fan = plot_fan_chart(sim, currency="EUR", horizon_months=12)
+        fig_fan = plot_fan_chart([sim], currency="EUR", horizon_months=12)
         st.plotly_chart(fig_fan, use_container_width=True)
 
 # ---------------------------------------------------------------------------

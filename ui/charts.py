@@ -681,7 +681,7 @@ def plot_sweep_heatmap(
 def plot_fan_chart(
     sim_results: list,  # list[PathSimulation]
     horizon_months: int,
-    monthly_contribution: float,
+    monthly_contribution: float = 0.0,
     currency: str = "EUR",
 ) -> go.Figure:
     """Fan chart showing wealth distribution for multiple deploy fractions.

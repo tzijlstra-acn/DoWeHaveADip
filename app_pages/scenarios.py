@@ -186,7 +186,7 @@ with tab_paths:
                 f"{sim.prob_beats_dca:.0%}",
                 help="Fraction of historical draws where this strategy ended ahead of monthly DCA",
             )
-            fig_fan = plot_fan_chart(sim, currency="EUR", horizon_months=cp_horizon)
+            fig_fan = plot_fan_chart([sim], currency="EUR", horizon_months=cp_horizon)
             st.plotly_chart(fig_fan, use_container_width=True)
 
     elif not cp_sims and st.session_state.get("scenarios_cp_sims"):

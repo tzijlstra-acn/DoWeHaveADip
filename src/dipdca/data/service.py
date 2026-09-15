@@ -87,7 +87,10 @@ class _ProviderAdapter:
         )
 
         age_minutes = (retrieved_at - observed_at).total_seconds() / 60
-        if _missed_trading_day(observed_at.date()):
+        # Only raise StaleLiveData when the request covers recent dates.
+        # Historical backtests (e.g. end=2024-12-31) legitimately end in the past;
+        # their last observation being old is expected, not stale.
+        if _is_recent_request(end) and _missed_trading_day(observed_at.date()):
             raise StaleLiveData(
                 f"Last observation for {symbol} is from {observed_at.date()} "
                 f"— at least one full trading day has passed without new data"
@@ -142,6 +145,17 @@ def _last_weekday(d: date) -> date:
     while d.weekday() >= 5:  # 5=Sat, 6=Sun
         d -= timedelta(days=1)
     return d
+
+
+def _is_recent_request(requested_end: date) -> bool:
+    """True when the requested end date is within 2 business days of today.
+
+    Backtests with a past end date (e.g. end=2024-12-31) are expected to have
+    old observations — staleness only applies when the user intended to fetch
+    current market data.
+    """
+    cutoff = _last_weekday(date.today() - timedelta(days=2))
+    return requested_end >= cutoff
 
 
 def _missed_trading_day(last_obs_date: date) -> bool:
