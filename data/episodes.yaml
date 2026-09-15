@@ -1,0 +1,64 @@
+episodes:
+  - label: "Dot-com Crash"
+    start: "2000-03-10"
+    end: "2002-10-09"
+    max_drawdown: -0.49
+    recovery: "2007-05-30"
+    note: "Tech bubble burst. Nasdaq lost 78%."
+    category: "bubble"
+
+  - label: "9/11 Shock"
+    start: "2001-09-10"
+    end: "2001-09-21"
+    max_drawdown: -0.12
+    recovery: "2001-11-11"
+    note: "Terrorist attacks. Brief but sharp shock."
+    category: "geopolitical"
+
+  - label: "Global Financial Crisis"
+    start: "2007-10-09"
+    end: "2009-03-09"
+    max_drawdown: -0.57
+    recovery: "2013-03-28"
+    note: "Lehman collapse, housing crisis, bank runs."
+    category: "financial"
+
+  - label: "Euro Crisis"
+    start: "2011-07-22"
+    end: "2011-10-03"
+    max_drawdown: -0.21
+    recovery: "2012-03-02"
+    note: "Greece/Italy sovereign debt fears. ECB backstop saved it."
+    category: "macro"
+
+  - label: "China Slowdown"
+    start: "2015-08-17"
+    end: "2015-08-25"
+    max_drawdown: -0.11
+    recovery: "2015-10-27"
+    note: "Chinese devaluation + commodity crash fears."
+    category: "macro"
+
+  - label: "Rate Hike Tantrum"
+    start: "2018-09-20"
+    end: "2018-12-24"
+    max_drawdown: -0.20
+    recovery: "2019-04-23"
+    note: "Fed hiking cycle + trade war fears. Christmas Eve low."
+    category: "macro"
+
+  - label: "COVID Crash"
+    start: "2020-02-19"
+    end: "2020-03-23"
+    max_drawdown: -0.34
+    recovery: "2020-08-18"
+    note: "Fastest 30% drop in history. Fastest recovery too."
+    category: "macro"
+
+  - label: "2022 Rate Shock"
+    start: "2022-01-03"
+    end: "2022-10-12"
+    max_drawdown: -0.25
+    recovery: "2024-01-19"
+    note: "Fed 425bps in 12 months. TINA died. Bonds also crashed."
+    category: "macro"

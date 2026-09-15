@@ -1,0 +1,41 @@
+name: Data Health Check
+
+on:
+  schedule:
+    - cron: "0 7 * * 1-5"  # Weekdays at 07:00 UTC
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run data health check
+        run: |
+          uv run python -c "
+          from dipdca.data.providers.yahoo import YahooProvider
+          from dipdca.config import load_assets_config
+
+          provider = YahooProvider()
+          assets = load_assets_config()
+          issues = []
+          for asset in assets:
+              status = provider.health_check(asset['etf_symbol'])
+              if status.error or status.is_stale:
+                  issues.append(f'{asset[\"etf_symbol\"]}: {status.error or \"STALE\"}')
+
+          if issues:
+              print('DATA ISSUES DETECTED:')
+              for issue in issues:
+                  print(f'  - {issue}')
+              raise SystemExit(1)
+          else:
+              print('All data sources healthy.')
+          "

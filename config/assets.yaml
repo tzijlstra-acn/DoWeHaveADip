@@ -1,0 +1,110 @@
+assets:
+  - id: nasdaq100
+    display_name: "Nasdaq-100"
+    index_symbol: "^NDX"
+    etf_symbol: "QQQ"
+    quote_currency: "USD"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: []
+    notes: "Market-cap-weighted index of 100 largest non-financial Nasdaq-listed companies"
+
+  - id: nasdaq_composite
+    display_name: "Nasdaq Composite"
+    index_symbol: "^IXIC"
+    etf_symbol: "ONEQ"
+    quote_currency: "USD"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: []
+    notes: "All common stocks listed on the Nasdaq stock market"
+
+  - id: sp500
+    display_name: "S&P 500"
+    index_symbol: "^GSPC"
+    etf_symbol: "SPY"
+    quote_currency: "USD"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: ["IVV", "VOO"]
+    notes: "500 large-cap US stocks"
+
+  - id: stoxx600
+    display_name: "STOXX 600"
+    index_symbol: "^STOXX"
+    etf_symbol: "EXSA.DE"
+    quote_currency: "EUR"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: []
+    notes: "600 large, mid and small cap European companies"
+
+  - id: dax
+    display_name: "DAX"
+    index_symbol: "^GDAXI"
+    etf_symbol: "EXS1.DE"
+    quote_currency: "EUR"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: []
+    notes: "40 largest German companies by market cap"
+
+  - id: aex
+    display_name: "AEX"
+    index_symbol: "^AEX"
+    etf_symbol: "IAEX.AS"
+    quote_currency: "EUR"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: []
+    notes: "25 largest companies listed on Euronext Amsterdam"
+
+  - id: smi
+    display_name: "SMI"
+    index_symbol: "^SSMI"
+    etf_symbol: "CSSMI.SW"
+    quote_currency: "CHF"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: []
+    notes: "20 largest and most liquid Swiss companies"
+
+  - id: msci_world
+    display_name: "MSCI World"
+    index_symbol: null
+    etf_symbol: "IWDA.AS"
+    quote_currency: "EUR"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: ["SWDA.L"]
+    notes: "~1500 large/mid-cap companies in 23 developed markets"
+
+  - id: ftse_all_world
+    display_name: "FTSE All-World"
+    index_symbol: null
+    etf_symbol: "VWCE.DE"
+    quote_currency: "EUR"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: ["VWRL.L"]
+    notes: "~3700 large/mid-cap companies in 49 countries"
+
+  - id: emerging_markets
+    display_name: "Emerging Markets"
+    index_symbol: null
+    etf_symbol: "IS3N.DE"
+    quote_currency: "EUR"
+    category: "equity"
+    is_hedged: false
+    data_provider: "yahoo"
+    fallback_symbols: ["EIMI.L"]
+    notes: "MSCI Emerging Markets IMI — ~3000 stocks in 24 EM countries"

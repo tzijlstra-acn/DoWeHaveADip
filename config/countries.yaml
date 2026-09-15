@@ -1,0 +1,24 @@
+countries:
+  - code: "NL"
+    display_name: "Netherlands"
+    base_currency: "EUR"
+    timezone: "Europe/Amsterdam"
+    cash_rate_source: "ecb"
+    tax_rate_default: 0.0
+    notes: "Box 3 wealth tax applies separately — use net-of-tax contributions"
+
+  - code: "DE"
+    display_name: "Germany"
+    base_currency: "EUR"
+    timezone: "Europe/Berlin"
+    cash_rate_source: "ecb"
+    tax_rate_default: 0.26375
+    notes: "Abgeltungssteuer 25% + Soli 5.5%"
+
+  - code: "CH"
+    display_name: "Switzerland"
+    base_currency: "CHF"
+    timezone: "Europe/Zurich"
+    cash_rate_source: "snb"
+    tax_rate_default: 0.35
+    notes: "Verrechnungssteuer 35% on dividends; cantonal rates vary"
