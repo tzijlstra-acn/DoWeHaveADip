@@ -8,7 +8,7 @@ market data; provider modules themselves must not use @st.cache_data.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from typing import Literal
 
@@ -87,10 +87,10 @@ class _ProviderAdapter:
         )
 
         age_minutes = (retrieved_at - observed_at).total_seconds() / 60
-        if age_minutes > settings.MARKET_DATA_MAX_AGE_MINUTES:
+        if _missed_trading_day(observed_at.date()):
             raise StaleLiveData(
-                f"Last observation for {symbol} is {age_minutes:.0f} minutes old "
-                f"(limit: {settings.MARKET_DATA_MAX_AGE_MINUTES})"
+                f"Last observation for {symbol} is from {observed_at.date()} "
+                f"— at least one full trading day has passed without new data"
             )
 
         status = _freshness_status(age_minutes)
@@ -116,9 +116,10 @@ class _ProviderAdapter:
         observed_at = datetime.combine(as_of, datetime.min.time(), tzinfo=UTC)
         age_minutes = (retrieved_at - observed_at).total_seconds() / 60
 
-        if age_minutes > settings.MARKET_DATA_MAX_AGE_MINUTES:
+        if _missed_trading_day(as_of):
             raise StaleLiveData(
-                f"Latest quote for {symbol} is {age_minutes:.0f} minutes old"
+                f"Latest quote for {symbol} is from {as_of} "
+                f"— at least one full trading day has passed without new data"
             )
 
         import pandas as pd
@@ -134,6 +135,24 @@ class _ProviderAdapter:
             label=_freshness_label(status),
         )
         return PriceDataResult(frame=frame, freshness=freshness)
+
+
+def _last_weekday(d: date) -> date:
+    """Return d or the nearest preceding weekday (Mon–Fri)."""
+    while d.weekday() >= 5:  # 5=Sat, 6=Sun
+        d -= timedelta(days=1)
+    return d
+
+
+def _missed_trading_day(last_obs_date: date) -> bool:
+    """True only when at least one full trading weekday passed without new data.
+
+    Accepts Friday data on Saturday/Sunday/Monday (market was closed).
+    Raises for Friday data on Tuesday (market traded Monday and no update came).
+    Uses yesterday as the cutoff so pre-market hours on a trading day are tolerated.
+    """
+    cutoff = _last_weekday(date.today() - timedelta(days=1))
+    return last_obs_date < cutoff
 
 
 def _freshness_status(age_minutes: float) -> Literal["fresh", "delayed", "closed_market"]:
