@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+
+def _make_fp(params: dict) -> str:
+    return hashlib.sha256(json.dumps(params, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -249,7 +255,16 @@ with tab_sweep:
         key="run_sweep_etf",
     )
 
-    if run_sweep_btn or "sweep_results_cache" in st.session_state:
+    _sweep_fp = _make_fp({
+        "symbol": symbol, "start": str(param_dict["start_date"]), "end": str(param_dict["end_date"]),
+        "monthly": param_dict["monthly_contribution"], "payday": param_dict["payday"],
+        "initial": param_dict["initial_investment"], "max_wait": param_dict["max_wait_months"],
+        "fixed_fee": param_dict["fixed_fee"], "pct_fee": param_dict["pct_fee"],
+        "thresholds": sorted(thresholds), "deploys": sorted(deploy_pcts),
+        "window_years": window_years, "step_months": step_months,
+    })
+
+    if run_sweep_btn:
         buf = io.BytesIO()
         price_df.to_parquet(buf)
 
@@ -272,9 +287,16 @@ with tab_sweep:
                 window_years_v=window_years,
                 step_months_v=step_months,
             )
-            st.session_state["sweep_results_cache"] = raw_results
+            st.session_state["sweep_results_cache"] = {"fp": _sweep_fp, "data": raw_results}
 
-        results_dicts = st.session_state.get("sweep_results_cache", [])
+    _stored_sweep = st.session_state.get("sweep_results_cache")
+    if _stored_sweep and isinstance(_stored_sweep, dict) and _stored_sweep.get("fp") == _sweep_fp:
+        results_dicts = _stored_sweep["data"]
+    elif _stored_sweep:
+        st.info("Settings changed — click Run to update results.")
+        results_dicts = []
+    else:
+        results_dicts = []
 
         if not results_dicts:
             st.info(
@@ -437,7 +459,14 @@ with tab_path:
 
     run_path_btn = st.button("Run Conditional Path Bootstrap", key="run_path")
 
-    if run_path_btn or "path_results_cache" in st.session_state:
+    _path_fp = _make_fp({
+        "symbol": symbol, "start": str(param_dict["start_date"]), "end": str(param_dict["end_date"]),
+        "current_dd": current_dd_input, "monthly": param_dict["monthly_contribution"],
+        "cash": round(cash_accumulated), "horizon": horizon_months, "n_sims": n_sims,
+        "deploys": sorted(path_deploy_pcts),
+    })
+
+    if run_path_btn:
         buf2 = io.BytesIO()
         price_df.to_parquet(buf2)
 
@@ -454,9 +483,16 @@ with tab_path:
                 horizon_months=horizon_months,
                 n_simulations=n_sims,
             )
-            st.session_state["path_results_cache"] = raw_path_results
+            st.session_state["path_results_cache"] = {"fp": _path_fp, "data": raw_path_results}
 
-        path_dicts = st.session_state.get("path_results_cache", [])
+    _stored_path = st.session_state.get("path_results_cache")
+    if _stored_path and isinstance(_stored_path, dict) and _stored_path.get("fp") == _path_fp:
+        path_dicts = _stored_path["data"]
+    elif _stored_path:
+        st.info("Settings changed — click Run to update results.")
+        path_dicts = []
+    else:
+        path_dicts = []
 
         if not path_dicts:
             st.warning(
@@ -671,6 +707,13 @@ with tab_deep:
                 for r in sweep_results
             ]
 
+        _dh_fp = _make_fp({
+            "ticker": dh_ticker, "monthly": param_dict["monthly_contribution"],
+            "payday": param_dict["payday"], "window_years": dh_window_years,
+            "step_months": dh_step_months, "thresholds": sorted(thresholds),
+            "deploys": sorted(deploy_pcts),
+        })
+
         if run_dh_sweep_btn:
             with st.spinner(
                 f"Running parameter sweep on {dh_ticker_name} ({len(dh_monthly)} months)..."
@@ -684,9 +727,16 @@ with tab_deep:
                     thresholds_t=tuple(thresholds),
                     deploy_pcts_t=tuple(deploy_pcts),
                 )
-            st.session_state["dh_sweep_cache"] = dh_sweep_raw
+                st.session_state["dh_sweep_cache"] = {"fp": _dh_fp, "data": dh_sweep_raw}
 
-        dh_results = st.session_state.get("dh_sweep_cache", [])
+        _stored_dh = st.session_state.get("dh_sweep_cache")
+        if _stored_dh and isinstance(_stored_dh, dict) and _stored_dh.get("fp") == _dh_fp:
+            dh_results = _stored_dh["data"]
+        elif _stored_dh:
+            st.info("Settings changed — click Run to update results.")
+            dh_results = []
+        else:
+            dh_results = []
 
         if dh_results:
             dh_sweep_df = sweep_to_dataframe(

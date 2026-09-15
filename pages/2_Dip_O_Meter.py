@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -343,6 +345,18 @@ if not episodes.empty:
             or [0.25, 0.50, 0.75, 1.00]
         )
 
+        _cp_fp = hashlib.sha256(
+            json.dumps(
+                {
+                    "symbol": symbol, "start": str(start_date), "end": str(end_date),
+                    "threshold": threshold, "monthly": cp_monthly, "cash": round(cp_cash),
+                    "horizon": cp_horizon, "deploys": sorted(cp_deploy_pcts),
+                    "current_dd": round(current_dd, 4),
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:16]
+
         if st.button("Run conditional path bootstrap", key="dip_run_cp"):
             with st.spinner(
                 f"Bootstrapping paths from {current_dd:.0%} historical entries..."
@@ -356,21 +370,30 @@ if not episodes.empty:
                     horizon_months=cp_horizon,
                     n_simulations=500,
                 )
-            st.session_state["dip_cp_sims"] = [
-                {
-                    "deploy_pct": s.deploy_pct,
-                    "p5_wealth": s.p5_wealth.tolist(),
-                    "p25_wealth": s.p25_wealth.tolist(),
-                    "p50_wealth": s.p50_wealth.tolist(),
-                    "p75_wealth": s.p75_wealth.tolist(),
-                    "p95_wealth": s.p95_wealth.tolist(),
-                    "prob_beats_dca": s.prob_beats_dca,
-                    "horizon_months": s.horizon_months,
-                }
-                for s in cp_sims
-            ]
+            st.session_state["dip_cp_sims"] = {
+                "fp": _cp_fp,
+                "data": [
+                    {
+                        "deploy_pct": s.deploy_pct,
+                        "p5_wealth": s.p5_wealth.tolist(),
+                        "p25_wealth": s.p25_wealth.tolist(),
+                        "p50_wealth": s.p50_wealth.tolist(),
+                        "p75_wealth": s.p75_wealth.tolist(),
+                        "p95_wealth": s.p95_wealth.tolist(),
+                        "prob_beats_dca": s.prob_beats_dca,
+                        "horizon_months": s.horizon_months,
+                    }
+                    for s in cp_sims
+                ],
+            }
 
-        cp_dicts = st.session_state.get("dip_cp_sims", [])
+        _stored_cp = st.session_state.get("dip_cp_sims")
+        if _stored_cp and isinstance(_stored_cp, dict) and _stored_cp.get("fp") == _cp_fp:
+            cp_dicts = _stored_cp["data"]
+        else:
+            if _stored_cp:
+                st.info("Parameters changed — click Run to update results.")
+            cp_dicts = []
         if cp_dicts:
             cp_path_sims = [
                 PathSimulation(
