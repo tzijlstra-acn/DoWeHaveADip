@@ -97,7 +97,7 @@ def wealth_comparison_chart(
         go.Scatter(
             x=dca_ledger.index,
             y=dca_ledger["total_wealth"],
-            name="Monthly Machine (DCA)",
+            name="Invest monthly (DCA)",
             line={"color": COLORS["dca"], "width": 2},
             hovertemplate="<b>DCA</b><br>Date: %{x|%Y-%m-%d}<br>Wealth: %{y:,.0f}<extra></extra>",
         )
@@ -107,7 +107,7 @@ def wealth_comparison_chart(
         go.Scatter(
             x=dip_ledger.index,
             y=dip_ledger["total_wealth"],
-            name="Cash Goblin (Wait-for-Dip)",
+            name="Wait for a dip",
             line={"color": COLORS["dip"], "width": 2},
             hovertemplate="<b>Wait-for-Dip</b><br>Date: %{x|%Y-%m-%d}<br>Wealth: %{y:,.0f}<extra></extra>",
         )
@@ -269,7 +269,7 @@ def plot_strategy_wealth(
         go.Scatter(
             x=dca_ledger.index,
             y=dca_ledger["total_wealth"],
-            name="Monthly Machine (DCA)",
+            name="Invest monthly (DCA)",
             line=dict(color=GREEN, width=2),
             hovertemplate="<b>DCA</b><br>%{x|%Y-%m-%d}<br>%{y:,.0f}<extra></extra>",
         ),
@@ -280,7 +280,7 @@ def plot_strategy_wealth(
         go.Scatter(
             x=dip_ledger.index,
             y=dip_ledger["total_wealth"],
-            name="Cash Goblin (Dip)",
+            name="Wait for a dip",
             line=dict(color=ORANGE, width=2),
             hovertemplate="<b>Dip</b><br>%{x|%Y-%m-%d}<br>%{y:,.0f}<extra></extra>",
         ),
@@ -293,7 +293,7 @@ def plot_strategy_wealth(
             go.Scatter(
                 x=tiered_ledger.index,
                 y=tiered_ledger["total_wealth"],
-                name="Dip Buffet (Tiered)",
+                name="Tiered deployment",
                 line=dict(color=GOLD, width=2, dash="dot"),
                 hovertemplate="<b>Tiered</b><br>%{x|%Y-%m-%d}<br>%{y:,.0f}<extra></extra>",
             ),
@@ -323,7 +323,7 @@ def plot_strategy_wealth(
     apply_chart_layout(
         fig,
         title=f"Strategy portfolio value ({base_currency})",
-        subtitle="Shaded = dip episodes | Monthly Machine vs Cash Goblin",
+        subtitle="Shaded = dip episodes | DCA vs Wait-for-dip",
     )
     fig.update_yaxes(title_text=f"Wealth ({base_currency})", row=1, col=1)
     fig.update_yaxes(title_text="DD (%)", ticksuffix="%", row=2, col=1)
