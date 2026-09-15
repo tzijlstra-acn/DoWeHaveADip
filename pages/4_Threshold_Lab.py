@@ -201,6 +201,7 @@ def cached_path_bootstrap(
     cash_accumulated: float,
     horizon_months: int,
     n_simulations: int,
+    seed: int = 42,
 ) -> list[dict]:
     """Run conditional path bootstrap and return serialisable results."""
     df = pd.read_parquet(io.BytesIO(price_bytes))
@@ -214,6 +215,7 @@ def cached_path_bootstrap(
         cash_accumulated=cash_accumulated,
         horizon_months=horizon_months,
         n_simulations=n_simulations,
+        seed=seed,
     )
 
     return [

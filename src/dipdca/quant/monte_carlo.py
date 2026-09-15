@@ -210,6 +210,7 @@ def conditional_path_bootstrap(
     horizon_months: int = 24,
     n_simulations: int = 500,
     cash_rate: float = 0.02,
+    seed: int = 42,
 ) -> list[PathSimulation]:
     """Bootstrap historical continuation paths given current drawdown level.
 
@@ -275,6 +276,7 @@ def conditional_path_bootstrap(
         return []
 
     monthly_cash_factor = (1 + cash_rate) ** (1 / 12)
+    rng = np.random.default_rng(seed)
 
     results: list[PathSimulation] = []
 
@@ -284,8 +286,8 @@ def conditional_path_bootstrap(
         sim_dca_terminals: list[float] = []
 
         for _ in range(n_simulations):
-            # Sample a continuation path
-            path = continuation_paths[np.random.randint(len(continuation_paths))]
+            # Sample a continuation path using seeded RNG
+            path = continuation_paths[rng.integers(len(continuation_paths))]
             n_months = len(path)
 
             # --- Dip strategy ---
@@ -305,15 +307,15 @@ def conditional_path_bootstrap(
             sim_wealth_paths.append(wealth_path)
             sim_terminal_wealths.append(wealth_path[-1] if wealth_path else 0.0)
 
-            # --- DCA baseline (invest monthly, cash_accumulated stays in cash) ---
-            dca_invested = 0.0
+            # --- DCA baseline: each monthly contribution earns returns from its investment
+            # month forward, not from entry. Paired with the same sampled path. ---
             dca_cash = cash_accumulated
-            for m in range(n_months):
-                return_factor = float(path[m])
-                dca_invested += monthly_contribution  # simplification: invest at start of each month
-                dca_terminal = dca_invested * return_factor + dca_cash * (
-                    monthly_cash_factor ** (m + 1)
-                )
+            # Contribution at t=0 (invested at entry): earns full path[-1]
+            dca_terminal_invested = monthly_contribution * float(path[-1])
+            # Contributions at t=1..n_months-1: earn path[-1]/path[m-1]
+            for m in range(1, n_months):
+                dca_terminal_invested += monthly_contribution * float(path[-1]) / float(path[m - 1])
+            dca_terminal = dca_terminal_invested + dca_cash * (monthly_cash_factor ** n_months)
             sim_dca_terminals.append(dca_terminal)
 
         # Build wealth matrix for percentile computation
