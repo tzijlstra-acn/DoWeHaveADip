@@ -1,31 +1,61 @@
-"""UI copy strings and labels."""
+"""UI copy strings and labels — plain language, no mascot names."""
 
 from __future__ import annotations
 
-APP_TITLE = "Dip, DCA & Chill"
-APP_TAGLINE = "Monthly Machine versus Cash Goblin — settled by historical data, not vibes."
-APP_ICON = "📉"
+APP_TITLE   = "Do we have a dip?"
+APP_TAGLINE = "Compare monthly investing, waiting for a dip, and investing now — using real market data."
+APP_ICON    = ":material/trending_down:"
+
+# ---------------------------------------------------------------------------
+# Strategy labels (no mascot names)
+# ---------------------------------------------------------------------------
+
+LABEL_DCA        = "Invest monthly (DCA)"
+LABEL_WAIT       = "Wait for a dip"
+LABEL_INVEST_NOW = "Invest now"
+LABEL_TIERED     = "Tiered deployment"
+
+# ---------------------------------------------------------------------------
+# Page descriptions
+# ---------------------------------------------------------------------------
 
 PAGE_DESCRIPTIONS = {
-    "Market Arcade": "Browse all assets and see their current drawdown status.",
-    "Dip-O-Meter": "How deep is the current dip? Which assets are on sale?",
-    "Strategy Lab": "Head-to-head: DCA vs waiting for the dip.",
-    "Threshold Lab": "Sweep dip thresholds to find the sweet spot — if it exists.",
-    "Exit Lab": "Model different exit strategies and their tax implications.",
-    "Currency Reality Check": "See how FX ate (or boosted) your returns.",
-    "Savings Rates": "Compare cash yields across NL / DE / CH.",
-    "Methodology & Data Health": "Formulas, assumptions, data sources, freshness.",
+    "Today":                 "Is this historically a dip? What have similar levels led to?",
+    "Compare choices":       "Head-to-head comparison: monthly DCA vs waiting vs investing now.",
+    "Historical scenarios":  "How have similar market levels played out historically?",
+    "How it works":          "Methodology, data sources, formulas, and assumptions.",
+    "Market overview":       "Browse all tracked assets and their current drawdown status.",
+    "Exit strategies":       "Model deterministic exit rules vs never selling.",
+    "Currency breakdown":    "How FX movements affected your returns on foreign assets.",
+    "Interest rates":        "Official ECB and SNB policy rates as an opportunity-cost baseline.",
 }
+
+# ---------------------------------------------------------------------------
+# Drawdown descriptions (plain language)
+# ---------------------------------------------------------------------------
+
+DRAWDOWN_LABELS: dict[tuple[float, float], str] = {
+    (-0.05, 0.0):   "Minimal decline",
+    (-0.10, -0.05): "Minor pullback",
+    (-0.20, -0.10): "Moderate drawdown",
+    (-0.40, -0.20): "Significant drawdown",
+    (-1.00, -0.40): "Severe drawdown",
+}
+
+
+def drawdown_label(dd: float) -> str:
+    """Return a plain-language label for a drawdown fraction (negative)."""
+    for (lo, hi), label in DRAWDOWN_LABELS.items():
+        if lo <= dd < hi:
+            return label
+    return "Severe drawdown"
+
+
+# ---------------------------------------------------------------------------
+# Disclaimer
+# ---------------------------------------------------------------------------
 
 DISCLAIMER_SHORT = (
     "Educational and informational purposes only. "
     "Not investment advice. Past performance does not guarantee future results."
 )
-
-DRAWDOWN_LABEL_DESCRIPTIONS = {
-    "Barely a dip": "A gentle wobble. Carry on.",
-    "Snack-size salsa": "Worth watching, not panicking.",
-    "Proper nacho dip": "Now we're talking. Strategy time.",
-    "Bear-market guacamole": "This is a real bear. Patience required.",
-    "Financial Mariana Trench": "Historic drawdown. Either a crisis or an opportunity.",
-}

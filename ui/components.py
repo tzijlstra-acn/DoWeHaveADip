@@ -14,11 +14,11 @@ from ui.formatting import fmt_pct
 
 
 def demo_banner() -> None:
-    """Full-width orange warning banner for demo mode."""
+    """Full-width warning banner for demo mode."""
     st.warning(
         "**DEMO DATA** — No live market data available. Showing synthetic fixtures only. "
         "Results are illustrative, not a representation of any real market.",
-        icon="⚠️",
+        icon=":material/warning:",
     )
 
 
@@ -29,7 +29,7 @@ def live_data_error(error: LiveDataUnavailable, context: str = "") -> None:
         f"**Live market data is unavailable{location}.** "
         "No backup dataset is being shown. "
         "Check your connection and retry, or return later.",
-        icon="🔌",
+        icon=":material/error:",
     )
     col_retry, col_space = st.columns([1, 4])
     with col_retry:
@@ -77,23 +77,24 @@ def strategy_comparison_cards(
     dip_result: StrategyResult,
     currency: str = "EUR",
 ) -> None:
-    """Side-by-side comparison hero cards for DCA vs Dip."""
+    """Side-by-side comparison cards for DCA vs Wait-for-dip."""
+    from ui.design_tokens import NEUTRAL, POSITIVE, WARNING  # local import avoids circular
     dca_wins = dca_result.ending_wealth >= dip_result.ending_wealth
-    winner_label = "Monthly Machine wins!" if dca_wins else "Cash Goblin wins!"
     diff = abs(dca_result.ending_wealth - dip_result.ending_wealth)
+    winner_label = "Invest monthly came out ahead" if dca_wins else "Wait-for-dip came out ahead"
 
     col1, col_mid, col2 = st.columns([2, 1, 2])
 
     with col1:
-        color = "#00C896" if dca_wins else "#6B7280"
+        color = POSITIVE if dca_wins else NEUTRAL
         st.markdown(
             f"""
             <div style="border:2px solid {color}; border-radius:10px; padding:16px; text-align:center;">
-                <h3 style="margin:0;color:{color}">🤖 Monthly Machine</h3>
+                <h3 style="margin:0;color:{color}">Invest monthly (DCA)</h3>
                 <p style="font-size:2em;margin:8px 0;font-weight:bold">{currency} {dca_result.ending_wealth:,.0f}</p>
-                <p style="margin:4px 0;color:#aaa">XIRR: {fmt_pct(dca_result.xirr)}</p>
-                <p style="margin:4px 0;color:#aaa">Max DD: {fmt_pct(dca_result.max_drawdown)}</p>
-                <p style="margin:4px 0;color:#aaa">In market: {fmt_pct(dca_result.time_in_market_pct)}</p>
+                <p style="margin:4px 0;color:#6B7280">Ann. return: {fmt_pct(dca_result.xirr)}</p>
+                <p style="margin:4px 0;color:#6B7280">Max DD: {fmt_pct(dca_result.max_drawdown)}</p>
+                <p style="margin:4px 0;color:#6B7280">In market: {fmt_pct(dca_result.time_in_market_pct)}</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -103,24 +104,23 @@ def strategy_comparison_cards(
         st.markdown(
             f"""
             <div style="text-align:center; padding:20px 0;">
-                <p style="font-size:1.5em;margin:0">⚔️</p>
-                <p style="font-size:0.85em;color:#F47920;font-weight:bold;margin:8px 0">{winner_label}</p>
-                <p style="font-size:0.8em;color:#aaa">by {currency} {diff:,.0f}</p>
+                <p style="font-size:0.85em;color:#374151;font-weight:bold;margin:8px 0">{winner_label}</p>
+                <p style="font-size:0.8em;color:#6B7280">by {currency} {diff:,.0f}</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     with col2:
-        color = "#F47920" if not dca_wins else "#6B7280"
+        color = WARNING if not dca_wins else NEUTRAL
         st.markdown(
             f"""
             <div style="border:2px solid {color}; border-radius:10px; padding:16px; text-align:center;">
-                <h3 style="margin:0;color:{color}">💰 Cash Goblin</h3>
+                <h3 style="margin:0;color:{color}">Wait for a dip</h3>
                 <p style="font-size:2em;margin:8px 0;font-weight:bold">{currency} {dip_result.ending_wealth:,.0f}</p>
-                <p style="margin:4px 0;color:#aaa">XIRR: {fmt_pct(dip_result.xirr)}</p>
-                <p style="margin:4px 0;color:#aaa">Max DD: {fmt_pct(dip_result.max_drawdown)}</p>
-                <p style="margin:4px 0;color:#aaa">In market: {fmt_pct(dip_result.time_in_market_pct)}</p>
+                <p style="margin:4px 0;color:#6B7280">Ann. return: {fmt_pct(dip_result.xirr)}</p>
+                <p style="margin:4px 0;color:#6B7280">Max DD: {fmt_pct(dip_result.max_drawdown)}</p>
+                <p style="margin:4px 0;color:#6B7280">In market: {fmt_pct(dip_result.time_in_market_pct)}</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -129,29 +129,27 @@ def strategy_comparison_cards(
 
 def dip_badge(drawdown_pct: float, label: str, threshold: float) -> None:
     """Colored badge showing current dip status."""
+    from ui.design_tokens import NEGATIVE, POSITIVE, WARNING
     if drawdown_pct <= threshold:
-        color = "#FF4B6B"
-        bg = "rgba(255,75,107,0.1)"
+        color = NEGATIVE
+        bg = "#FEF2F2"
         status = "DIP TRIGGERED"
-        icon = "🔴"
     elif drawdown_pct <= threshold * 0.5:
-        color = "#F47920"
-        bg = "rgba(244,121,32,0.1)"
+        color = WARNING
+        bg = "#FFFBEB"
         status = "APPROACHING"
-        icon = "🟠"
     else:
-        color = "#00C896"
-        bg = "rgba(0,200,150,0.1)"
+        color = POSITIVE
+        bg = "#ECFDF5"
         status = "IDLE"
-        icon = "🟢"
 
     st.markdown(
         f"""
         <div style="border:1px solid {color}; border-radius:8px; padding:10px 14px;
                     background:{bg}; display:inline-block; margin:4px;">
-            <span style="color:{color};font-weight:bold">{icon} {status}</span>
-            <br><span style="color:#FAFAFA;font-size:1.1em">{label}</span>
-            <br><span style="color:#aaa;font-size:0.85em">{drawdown_pct:.1%} from peak</span>
+            <span style="color:{color};font-weight:bold">{status}</span>
+            <br><span style="color:#111827;font-size:1.1em">{label}</span>
+            <br><span style="color:#6B7280;font-size:0.85em">{drawdown_pct:.1%} from peak</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -225,15 +223,19 @@ def evidence_label(n: int) -> str:
 
 
 def page_header(title: str, subtitle: str, icon: str = "") -> None:
-    """Render a styled page header with title and subtitle."""
-    prefix = f"{icon} " if icon else ""
+    """Render a styled page header with title and subtitle.
+
+    The icon parameter is accepted for backward compatibility but not rendered
+    in HTML — Material Symbols strings don't work in raw HTML. The nav sidebar
+    already shows the page icon.
+    """
     st.markdown(
         f"""
-        <div style="margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid #2D3047">
-            <h1 style="font-size:2em; font-weight:800; color:#FAFAFA; margin:0">
-                {prefix}{title}
+        <div style="margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid #E5E7EB">
+            <h1 style="font-size:2em; font-weight:800; color:#111827; margin:0">
+                {title}
             </h1>
-            <p style="color:#9CA3AF; margin:6px 0 0 0; font-size:0.95em">{subtitle}</p>
+            <p style="color:#6B7280; margin:6px 0 0 0; font-size:0.95em">{subtitle}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -242,14 +244,15 @@ def page_header(title: str, subtitle: str, icon: str = "") -> None:
 
 def sample_size_badge(n: int) -> None:
     """Display a colored sample-size badge."""
+    from ui.design_tokens import NEGATIVE, POSITIVE, WARNING
     if n < 10:
-        color = "#FF4B6B"
+        color = NEGATIVE
         label = f"n={n} — insufficient"
     elif n < 20:
-        color = "#F47920"
+        color = WARNING
         label = f"n={n} — small sample"
     else:
-        color = "#00C896"
+        color = POSITIVE
         label = f"n={n} — suggestive"
 
     st.markdown(
