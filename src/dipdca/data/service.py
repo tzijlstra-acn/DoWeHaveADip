@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, date, datetime
 from functools import lru_cache
+from typing import Literal
 
 import streamlit as st
 
@@ -135,7 +136,7 @@ class _ProviderAdapter:
         return PriceDataResult(frame=frame, freshness=freshness)
 
 
-def _freshness_status(age_minutes: float) -> str:
+def _freshness_status(age_minutes: float) -> Literal["fresh", "delayed", "closed_market"]:
     if age_minutes < 30:
         return "fresh"
     if age_minutes < 1440:

@@ -358,7 +358,7 @@ def test_same_seed_same_result():
     r1 = conditional_path_bootstrap(**kwargs)
     r2 = conditional_path_bootstrap(**kwargs)
     assert len(r1) == len(r2)
-    for s1, s2 in zip(r1, r2):
+    for s1, s2 in zip(r1, r2, strict=True):
         np.testing.assert_array_equal(s1.p50_wealth, s2.p50_wealth)
         assert s1.prob_beats_dca == s2.prob_beats_dca
 
