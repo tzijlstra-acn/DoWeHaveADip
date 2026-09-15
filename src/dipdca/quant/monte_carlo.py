@@ -260,7 +260,7 @@ def conditional_path_bootstrap(
     continuation_paths: list[np.ndarray] = []
     for entry in entry_dates:
         try:
-            entry_price = float(monthly_prices.asof(entry))
+            entry_price = float(monthly_prices.asof(entry))  # type: ignore[arg-type]
             if entry_price <= 0 or np.isnan(entry_price):
                 continue
             future_idx = monthly_prices.index[monthly_prices.index > entry][:horizon_months]

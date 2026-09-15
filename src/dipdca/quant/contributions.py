@@ -64,7 +64,7 @@ def next_trading_day(dt: pd.Timestamp, trading_index: pd.DatetimeIndex) -> pd.Ti
     pos = trading_index.searchsorted(dt)
     if pos >= len(trading_index):
         return None
-    return trading_index[pos]
+    return trading_index[int(pos)]
 
 
 def build_contribution_schedule(

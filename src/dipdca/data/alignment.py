@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pandas as pd
 
 
 def align_to_common_index(
     frames: dict[str, pd.DataFrame],
-    method: str = "ffill",
+    method: Literal["backfill", "bfill", "ffill", "pad", "nearest"] | None = "ffill",
     dropna: bool = True,
 ) -> dict[str, pd.DataFrame]:
     """Align multiple price DataFrames to a common DatetimeIndex.
@@ -60,7 +62,7 @@ def reindex_to_business_days(
     df: pd.DataFrame,
     start: pd.Timestamp,
     end: pd.Timestamp,
-    fill_method: str = "ffill",
+    fill_method: Literal["backfill", "bfill", "ffill", "pad", "nearest"] | None = "ffill",
 ) -> pd.DataFrame:
     """Reindex DataFrame to business days and forward-fill gaps."""
     bday_idx = pd.bdate_range(start, end)

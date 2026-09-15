@@ -59,7 +59,7 @@ def check_suspicious_returns(df: pd.DataFrame, threshold: float = 0.5) -> list[d
     returns = df["adj_close"].pct_change().dropna()
     suspicious = returns[returns.abs() > threshold]
     return [
-        {"date": str(dt.date()), "return": float(val)} for dt, val in suspicious.items()
+        {"date": str(pd.Timestamp(dt).date()), "return": float(val)} for dt, val in suspicious.items()  # type: ignore[arg-type]
     ]
 
 

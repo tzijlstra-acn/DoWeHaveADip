@@ -14,6 +14,7 @@ dependencies = [
     "pyarrow>=17.0",
     "pydantic>=2.8",
     "pyyaml>=6.0",
+    "tenacity>=8.5",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +25,8 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.11",
     "respx>=0.21",
+    "pandas-stubs>=2.2",
+    "types-PyYAML>=6.0",
 ]
 
 [build-system]
@@ -44,3 +47,16 @@ ignore = ["E501"]  # Line length: many long strings in Streamlit/Plotly code
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "live: marks tests that make real network calls (deselect with '-m not live')",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_unused_ignores = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["yfinance", "yfinance.*", "duckdb", "streamlit.*", "scipy.*"]
+ignore_missing_imports = true

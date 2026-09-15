@@ -54,7 +54,8 @@ def drawdown_episodes(dd_series: pd.Series, threshold: float = -0.05) -> pd.Data
     trough_date: pd.Timestamp | None = None
     trough_val = 0.0
 
-    for dt, val in dd_series.items():
+    for dt_raw, val in dd_series.items():
+        dt = pd.Timestamp(dt_raw)  # type: ignore[arg-type]
         if in_episode[dt]:
             if episode_start is None:
                 episode_start = dt
