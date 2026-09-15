@@ -260,7 +260,7 @@ if not episodes.empty and "fwd_1_year" in fwd_df.columns:
                 from scipy import stats as scipy_stats
 
                 ci = scipy_stats.proportion_confint(
-                    int(p_beat * n_obs), n_obs, alpha=0.1, method="wilson"
+                    round(p_beat * n_obs), n_obs, alpha=0.1, method="wilson"
                 )
                 st.metric("90% CI lower", f"{ci[0]:.0%}")
                 st.metric("90% CI upper", f"{ci[1]:.0%}")

@@ -496,8 +496,8 @@ with tab_path:
                         "Deploy %": f"{s.deploy_pct:.0%}",
                         "P(beats DCA)": f"{s.prob_beats_dca:.0%}",
                         "Median Wealth": f"EUR {s.p50_wealth[-1]:,.0f}",
-                        "P10 (Worst)": f"EUR {s.p5_wealth[-1]:,.0f}",
-                        "P90 (Best)": f"EUR {s.p95_wealth[-1]:,.0f}",
+                        "P5 (Worst 1-in-20)": f"EUR {s.p5_wealth[-1]:,.0f}",
+                        "P95 (Best 1-in-20)": f"EUR {s.p95_wealth[-1]:,.0f}",
                     }
                 )
             st.dataframe(
