@@ -40,11 +40,11 @@ from ui.charts import plot_fan_chart, plot_sweep_heatmap  # noqa: E402
 from ui.components import data_source_caption, page_header, sidebar_simulation_params  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
-st.set_page_config(page_title="Monte Carlo Lab", page_icon="🎲", layout="wide")
+st.set_page_config(page_title="Historical Scenario Lab", page_icon="🎲", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header(
-    "Monte Carlo Lab",
-    "Parameter sweep + conditional path bootstrap — because the future is uncertain.",
+    "Historical Scenario Lab",
+    "How has history played out at different dip thresholds? No predictions — just past data.",
     "🎲",
 )
 
@@ -56,7 +56,7 @@ param_dict = sidebar_simulation_params()
 st.sidebar.subheader("Ticker")
 symbol = st.sidebar.text_input("ETF Symbol", value="SPY")
 
-st.sidebar.subheader("Monte Carlo Settings")
+st.sidebar.subheader("Simulation Settings")
 window_years = st.sidebar.select_slider(
     "Rolling window size",
     options=[5, 10, 15, 20],
@@ -237,7 +237,7 @@ def cached_path_bootstrap(
 # Tabs
 # ---------------------------------------------------------------------------
 tab_sweep, tab_path, tab_deep = st.tabs(
-    ["Parameter Sweep", "Conditional Path", "Deep History"]
+    ["Threshold Sweep", "Historical Scenarios", "Deep History"]
 )
 
 # ============================================================
@@ -459,7 +459,7 @@ with tab_path:
             or [0.25, 0.50, 0.75, 1.00]
         )
 
-    run_path_btn = st.button("Run Conditional Path Bootstrap", key="run_path")
+    run_path_btn = st.button("Run Historical Scenario Simulation", key="run_path")
 
     _path_fp = _make_fp({
         "symbol": symbol, "start": str(param_dict["start_date"]), "end": str(param_dict["end_date"]),
@@ -473,8 +473,8 @@ with tab_path:
         price_df.to_parquet(buf2)
 
         with st.spinner(
-            f"Bootstrapping {n_sims} paths per deploy fraction from historical "
-            f"{current_dd:.0%} drawdown entries..."
+            f"Running historical scenario simulation: {n_sims} paths per deploy fraction "
+            f"from {current_dd:.0%} historical entries..."
         ):
             raw_path_results = cached_path_bootstrap(
                 price_bytes=buf2.getvalue(),
@@ -570,8 +570,8 @@ with tab_path:
         <div style="border:1px solid #3D4066; border-radius:10px; padding:12px;
                     background:rgba(30,33,48,0.6); margin-top:16px">
             <b style="color:#F47920">No lookahead guarantee</b>
-            <span style="color:#9CA3AF"> — paths are sampled from past continuations at
-            similar drawdown depths. Historical base rates are not forecasts.
+            <span style="color:#9CA3AF"> — outcomes come from real past market periods with
+            similar drawdowns. Historical base rates are not forecasts.
             Each resampled path is one possible future, not the predicted one.</span>
         </div>
         """,

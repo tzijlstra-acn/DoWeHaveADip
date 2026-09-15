@@ -296,15 +296,14 @@ if not episodes.empty:
 # ---------------------------------------------------------------------------
 if not episodes.empty:
     st.divider()
-    with st.expander("What happens if you deploy now?", expanded=False):
+    with st.expander("Historical Scenarios: What if you invest now?", expanded=False):
         st.markdown(
             f"""
             <div style="background:#1E2130; border:1px solid #2D3047; border-radius:10px;
                         padding:12px; margin-bottom:12px">
                 <b style="color:#F47920">Current drawdown: {current_dd:.1%}</b>
-                <span style="color:#9CA3AF"> — Bootstrap question:
-                given we're at this drawdown level, what have historical continuation paths
-                looked like depending on how much cash you deploy now?</span>
+                <span style="color:#9CA3AF"> — Looking at past market periods with a similar
+                drop, what happened next depending on how much cash you invested?</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -362,7 +361,7 @@ if not episodes.empty:
             ).encode()
         ).hexdigest()[:16]
 
-        if st.button("Run conditional path bootstrap", key="dip_run_cp"):
+        if st.button("Run historical scenario simulation", key="dip_run_cp"):
             with st.spinner(
                 f"Bootstrapping paths from {current_dd:.0%} historical entries..."
             ):
@@ -430,8 +429,8 @@ if not episodes.empty:
                         "Deploy %": f"{s.deploy_pct:.0%}",
                         "P(beats DCA)": f"{s.prob_beats_dca:.0%}",
                         "Median Wealth": f"EUR {s.p50_wealth[-1]:,.0f}",
-                        "P5 (Worst)": f"EUR {s.p5_wealth[-1]:,.0f}",
-                        "P95 (Best)": f"EUR {s.p95_wealth[-1]:,.0f}",
+                        "P5 (Worst 1-in-20)": f"EUR {s.p5_wealth[-1]:,.0f}",
+                        "P95 (Best 1-in-20)": f"EUR {s.p95_wealth[-1]:,.0f}",
                     }
                 )
             st.dataframe(
@@ -441,7 +440,7 @@ if not episodes.empty:
             st.caption(
                 f"Based on {len(episodes)} historical entry points at "
                 f"drawdown levels near {current_dd:.0%}. "
-                "500 bootstrap paths per deploy fraction. Not a forecast."
+                "500 sampled historical paths per option. Not a forecast."
             )
 
 # ---------------------------------------------------------------------------

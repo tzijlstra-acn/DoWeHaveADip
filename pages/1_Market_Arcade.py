@@ -111,7 +111,7 @@ for i, (name, df) in enumerate(price_frames.items()):
                 <h4 style="margin:0; color:#FAFAFA">{name}</h4>
                 <p style="margin:6px 0; font-size:1.8em; color:{color}; font-weight:800; line-height:1">{fmt_pct(current_dd)}</p>
                 <p style="margin:0; color:#9CA3AF; font-size:0.85em">{label}</p>
-                <p style="margin:4px 0; color:#6B7280; font-size:0.8em">Last: {last_price:.2f} | {days_since_high}d from ATH</p>
+                <p style="margin:4px 0; color:#6B7280; font-size:0.8em">Last: {last_price:.2f} | {days_since_high} calendar days from high</p>
                 <span style="background:{trigger_color}22; border:1px solid {trigger_color};
                              border-radius:4px; padding:2px 8px; color:{trigger_color};
                              font-size:0.8em; font-weight:600">{trigger_str}</span>

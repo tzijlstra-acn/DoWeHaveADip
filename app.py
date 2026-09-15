@@ -251,8 +251,8 @@ pages_info = [
         "#2D3047",
     ),
     (
-        "🏦 Savings Rates",
-        "What does your cash actually earn? Official ECB / SNB rates",
+        "🏦 Interest Rates",
+        "Official ECB and SNB rates — not retail savings accounts",
         "pages/7_Savings_Rates.py",
         "#2D3047",
     ),
