@@ -257,13 +257,18 @@ if not episodes.empty and "fwd_1_year" in fwd_df.columns:
             )
 
         with col_ci:
-            # Simple Wilson CI
+            # Wilson CI using scipy.stats.norm (no statsmodels dependency)
             if n_obs >= 5:
-                from scipy import stats as scipy_stats
+                from scipy.stats import norm as _norm
 
-                ci = scipy_stats.proportion_confint(
-                    round(p_beat * n_obs), n_obs, alpha=0.1, method="wilson"
-                )
+                z = _norm.ppf(0.95)  # z for 90% two-sided CI
+                k = round(p_beat * n_obs)
+                p_hat = k / n_obs
+                z2 = z * z
+                denom = 1 + z2 / n_obs
+                centre = (p_hat + z2 / (2 * n_obs)) / denom
+                margin = z * ((p_hat * (1 - p_hat) / n_obs + z2 / (4 * n_obs**2)) ** 0.5) / denom
+                ci = (max(0.0, centre - margin), min(1.0, centre + margin))
                 st.metric("90% CI lower", f"{ci[0]:.0%}")
                 st.metric("90% CI upper", f"{ci[1]:.0%}")
                 st.caption(
