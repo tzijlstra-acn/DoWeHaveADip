@@ -39,7 +39,7 @@ from datetime import date
 
 import pandas as pd
 
-from dipdca.models import SimulationParams, StrategyResult
+from dipdca.models import DeploymentTier, MarketDefinition, SimulationParams, StrategyResult
 from dipdca.quant.contributions import build_contribution_schedule
 from dipdca.quant.drawdown import drawdown as compute_drawdown
 from dipdca.quant.metrics import (
@@ -104,6 +104,10 @@ def _build_ledger_template(price_data: pd.DataFrame) -> pd.DataFrame:
             "interest": 0.0,
             "signal_dd": 0.0,
             "dd": 0.0,
+            # Benchmark audit columns (populated by run_dip_deployment when benchmark_data provided)
+            "benchmark_close": float("nan"),
+            "benchmark_ath": float("nan"),
+            "benchmark_drawdown": float("nan"),
         },
         index=idx,
     )
@@ -156,6 +160,303 @@ def _build_strategy_result(
         total_fees=total_fees,
         total_cash_interest=total_interest,
     )
+
+
+def run_savings_only(
+    price_data: pd.DataFrame,
+    params: SimulationParams,
+) -> tuple[StrategyResult, pd.DataFrame]:
+    """Savings-account-only strategy: all contributions stay in cash earning savings rate.
+
+    No asset purchases are ever made. This is a benchmark showing pure cash accumulation.
+    The same contribution schedule as DCA and dip strategies is used.
+    """
+    ledger = _build_ledger_template(price_data)
+    trading_days = list(ledger.index)
+    if not trading_days:
+        raise ValueError("No trading days in price data")
+
+    schedule = build_contribution_schedule(
+        params.start_date,
+        params.end_date,
+        params.monthly_contribution,
+        params.payday,
+        pd.DatetimeIndex(trading_days),
+    )
+    invest_map: dict[pd.Timestamp, float] = {}
+    for _, row in schedule.iterrows():
+        invest_date = row["invest_date"]
+        invest_map[invest_date] = invest_map.get(invest_date, 0.0) + row["amount"]
+
+    cash_rate = params.cash_rate_override if params.cash_rate_override is not None else 0.0
+
+    # All capital (including initial_investment) stays in cash
+    cash = params.initial_cash_reserve + params.initial_investment
+    total_interest = 0.0
+    cash_flows: list[tuple[date, float]] = []
+
+    # Record day-1 external flows
+    if cash > 0:
+        ledger.at[trading_days[0], "external_flow"] = cash
+        cash_flows.append((trading_days[0].date(), -cash))
+
+    prev_dt: pd.Timestamp | None = None
+    for _i, dt in enumerate(trading_days):
+        # 1. Accrue interest
+        if prev_dt is not None and cash > 0 and cash_rate > 0:
+            days_elapsed = (dt - prev_dt).days
+            interest = cash * ((1.0 + cash_rate) ** (days_elapsed / 365.25) - 1.0)
+            cash += interest
+            total_interest += interest
+            ledger.at[dt, "interest"] = interest
+
+        # 2. Receive contributions
+        contrib = invest_map.get(dt, 0.0)
+        if contrib > 0:
+            cash += contrib
+            ledger.at[dt, "external_flow"] = _ledger_float(ledger, dt, "external_flow") + contrib
+            cash_flows.append((dt.date(), -contrib))
+
+        # 3. No purchases — record ledger row
+        ledger.at[dt, "cash"] = cash
+        ledger.at[dt, "units"] = 0.0
+        ledger.at[dt, "market_value"] = 0.0
+        ledger.at[dt, "total_wealth"] = cash
+        ledger.at[dt, "deployed"] = 0.0
+        ledger.at[dt, "fees"] = 0.0
+
+        prev_dt = dt
+
+    total_contributions = schedule["amount"].sum() + params.initial_investment + params.initial_cash_reserve
+    years = (trading_days[-1] - trading_days[0]).days / 365.25
+
+    result = _build_strategy_result(
+        strategy_name="Savings account",
+        ledger=ledger,
+        cash_flows=cash_flows,
+        total_contributions=total_contributions,
+        total_fees=0.0,
+        total_interest=total_interest,
+        n_deployments=0,
+        years=years,
+    )
+    return result, ledger
+
+
+def run_dip_deployment(
+    price_data: pd.DataFrame,
+    params: SimulationParams,
+    tiers: list[DeploymentTier],
+    benchmark_data: pd.DataFrame | None = None,
+    market_def: MarketDefinition | None = None,
+) -> tuple[StrategyResult, pd.DataFrame]:
+    """Dip-deployment strategy with cumulative deployment targets.
+
+    Monthly savings accumulate in a savings account (earning cash_rate) until
+    a configured drawdown threshold is crossed. At each threshold, a configured
+    CUMULATIVE fraction of the eligible saved capital is deployed.
+
+    Signal source (ATH and drawdown):
+        When benchmark_data is provided, the drawdown signal is computed from the
+        benchmark index (e.g. Nasdaq-100 Index for a QQQ investment). This is the
+        correct model — the index decides WHEN to buy. When benchmark_data is None,
+        falls back to price_data (backward compatible).
+
+    Execution source:
+        Always uses price_data["adj_close"] — the investable instrument price.
+
+    eligible_capital = current_cash + principal_deployed_in_current_episode
+
+    incremental_trade = min(
+        cash,
+        max(0, tier.cumulative_deployment_fraction * eligible_capital
+               - principal_deployed_in_episode)
+    )
+
+    Thresholds trigger ONCE per drawdown episode (defined as ending at a new ATH).
+    Signal is detected at close t; execution happens at close t+1 (no look-ahead bias).
+
+    Args:
+        price_data: Investable instrument prices (ETF). Used for execution only.
+        params: Simulation parameters.
+        tiers: Cumulative deployment tier schedule.
+        benchmark_data: Optional reference index data. When provided, its adj_close
+            column is used for ATH and drawdown signal computation. Must be at least
+            as long as price_data; aligned to instrument calendar via forward-fill.
+        market_def: Optional metadata about the benchmark/instrument pairing.
+            Used only for audit ledger columns; does not change signal logic.
+    """
+    if not tiers:
+        raise ValueError("At least one DeploymentTier is required")
+    DeploymentTier.validate_schedule(tiers)
+
+    ledger = _build_ledger_template(price_data)
+    trading_days = list(ledger.index)
+    if not trading_days:
+        raise ValueError("No trading days in price data")
+
+    # Align benchmark series to instrument trading calendar.
+    # When benchmark_data is provided, forward-fill its closes to the instrument
+    # dates so every instrument date has a benchmark observation. This preserves
+    # the "signal at t, execute at t+1" guarantee even when the benchmark has
+    # different missing dates (e.g. US holiday vs European holiday).
+    if benchmark_data is not None and "adj_close" in benchmark_data.columns:
+        bm_aligned: pd.Series = (
+            benchmark_data["adj_close"]
+            .reindex(ledger.index, method="ffill")
+            .ffill()
+        )
+    else:
+        bm_aligned = price_data["adj_close"]
+
+    schedule = build_contribution_schedule(
+        params.start_date,
+        params.end_date,
+        params.monthly_contribution,
+        params.payday,
+        pd.DatetimeIndex(trading_days),
+    )
+    invest_map: dict[pd.Timestamp, float] = {}
+    for _, row in schedule.iterrows():
+        invest_date = row["invest_date"]
+        invest_map[invest_date] = invest_map.get(invest_date, 0.0) + row["amount"]
+
+    cash_rate = params.cash_rate_override if params.cash_rate_override is not None else 0.0
+
+    cash = params.initial_cash_reserve
+    units = 0.0
+    total_fees = 0.0
+    total_interest = 0.0
+    n_deployments = 0
+    cash_flows: list[tuple[date, float]] = []
+
+    # Deploy initial_investment on day 1 (same as DCA)
+    if params.initial_investment > 0 and trading_days:
+        p0 = float(price_data["adj_close"].iloc[0])
+        if p0 > 0:
+            net, cost = _apply_cost(params.initial_investment, params.fixed_fee, params.pct_fee, params.slippage)
+            units = net / p0
+            total_fees += cost
+            n_deployments += 1
+        ledger.at[trading_days[0], "external_flow"] = (
+            _ledger_float(ledger, trading_days[0], "external_flow") + params.initial_investment
+        )
+        ledger.at[trading_days[0], "deployed"] = params.initial_investment
+        cash_flows.append((trading_days[0].date(), -params.initial_investment))
+
+    if params.initial_cash_reserve > 0:
+        ledger.at[trading_days[0], "external_flow"] = (
+            _ledger_float(ledger, trading_days[0], "external_flow") + params.initial_cash_reserve
+        )
+        cash_flows.append((trading_days[0].date(), -params.initial_cash_reserve))
+
+    # Episode state
+    triggered_tiers: set[int] = set()
+    principal_deployed_in_episode = 0.0
+    prev_drawdown = 0.0
+    bm_running_high = 0.0  # benchmark ATH — drives signal; NOT instrument price
+    # Pending: (execute_on_or_after_dt, tier_index, amount)
+    pending_executions: list[tuple[pd.Timestamp, int, float]] = []
+
+    prev_dt: pd.Timestamp | None = None
+    for i, dt in enumerate(trading_days):
+        # Instrument price (execution only)
+        p = _ledger_float(ledger, dt, "price")
+        # Benchmark close (signal only)
+        bm_close = float(bm_aligned.iloc[i])
+
+        # 1. Accrue interest on cash
+        if prev_dt is not None and cash > 0 and cash_rate > 0:
+            days_elapsed = (dt - prev_dt).days
+            interest = cash * ((1.0 + cash_rate) ** (days_elapsed / 365.25) - 1.0)
+            cash += interest
+            total_interest += interest
+            ledger.at[dt, "interest"] = interest
+
+        # 2. Receive contributions
+        contrib = invest_map.get(dt, 0.0)
+        if contrib > 0:
+            cash += contrib
+            ledger.at[dt, "external_flow"] = _ledger_float(ledger, dt, "external_flow") + contrib
+            cash_flows.append((dt.date(), -contrib))
+
+        # 3. Execute pending trades (signalled at t-1, executed at t using instrument price)
+        deployed_today = 0.0
+        fees_today = 0.0
+        for exec_dt, tier_idx, amount in list(pending_executions):
+            if dt >= exec_dt and p > 0:
+                actual = min(amount, cash)
+                if actual > 0:
+                    net, cost = _apply_cost(actual, params.fixed_fee, params.pct_fee, params.slippage)
+                    units += net / p
+                    cash -= actual
+                    total_fees += cost
+                    n_deployments += 1
+                    deployed_today += actual
+                    fees_today += cost
+                    principal_deployed_in_episode += actual
+                pending_executions.remove((exec_dt, tier_idx, amount))
+
+        if deployed_today > 0:
+            ledger.at[dt, "deployed"] = _ledger_float(ledger, dt, "deployed") + deployed_today
+            ledger.at[dt, "fees"] = _ledger_float(ledger, dt, "fees") + fees_today
+
+        # 4. Value portfolio using instrument price
+        market_val = units * p
+        ledger.at[dt, "cash"] = cash
+        ledger.at[dt, "units"] = units
+        ledger.at[dt, "market_value"] = market_val
+        ledger.at[dt, "total_wealth"] = cash + market_val
+
+        # 5. Update benchmark ATH and drawdown (benchmark series, not instrument)
+        if bm_close >= bm_running_high or bm_running_high == 0.0:
+            bm_running_high = bm_close
+            if triggered_tiers:  # new benchmark ATH after episode — rearm
+                triggered_tiers = set()
+                principal_deployed_in_episode = 0.0
+            current_dd = 0.0
+        else:
+            current_dd = bm_close / bm_running_high - 1.0
+
+        # Write benchmark audit columns
+        ledger.at[dt, "benchmark_close"] = bm_close
+        ledger.at[dt, "benchmark_ath"] = bm_running_high
+        ledger.at[dt, "benchmark_drawdown"] = current_dd
+
+        # 6. Detect threshold crossings using benchmark drawdown
+        #    (signal at close t, execute at close t+1 using instrument price)
+        if i > 0:
+            for j, tier in enumerate(tiers):
+                if j in triggered_tiers:
+                    continue
+                # Crossing: yesterday benchmark above threshold, today at or below
+                crossed = prev_drawdown > tier.drawdown_threshold >= current_dd
+                if crossed:
+                    eligible = cash + principal_deployed_in_episode
+                    target_total = tier.cumulative_deployment_fraction * eligible
+                    incremental = min(cash, max(0.0, target_total - principal_deployed_in_episode))
+                    if incremental > 0 and i + 1 < len(trading_days):
+                        pending_executions.append((trading_days[i + 1], j, incremental))
+                    triggered_tiers.add(j)
+                    ledger.at[dt, "signal_dd"] = current_dd
+
+        prev_drawdown = current_dd
+        prev_dt = dt
+
+    total_contributions = schedule["amount"].sum() + params.initial_investment + params.initial_cash_reserve
+    years = (trading_days[-1] - trading_days[0]).days / 365.25
+
+    result = _build_strategy_result(
+        strategy_name="Dip deployment",
+        ledger=ledger,
+        cash_flows=cash_flows,
+        total_contributions=total_contributions,
+        total_fees=total_fees,
+        total_interest=total_interest,
+        n_deployments=n_deployments,
+        years=years,
+    )
+    return result, ledger
 
 
 def run_dca(

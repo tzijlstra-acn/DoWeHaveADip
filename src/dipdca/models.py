@@ -2,10 +2,77 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+@dataclass(frozen=True)
+class DeploymentTier:
+    """One threshold level in a dip-deployment schedule.
+
+    cumulative_deployment_fraction is the TOTAL fraction of eligible saved
+    capital that should be invested by the time this drawdown level is reached.
+    It is NOT a fraction of the remaining cash.
+
+    Example: tiers = [
+        DeploymentTier(-0.15, 0.25),  # 25% deployed by -15% drawdown
+        DeploymentTier(-0.25, 0.60),  # 60% in total deployed by -25%
+        DeploymentTier(-0.35, 1.00),  # 100% in total deployed by -35%
+    ]
+    """
+
+    drawdown_threshold: float  # must be negative
+    cumulative_deployment_fraction: float  # 0 < f <= 1, non-decreasing across tiers
+
+    def __post_init__(self) -> None:
+        if self.drawdown_threshold >= 0:
+            raise ValueError("drawdown_threshold must be negative")
+        if not (0.0 < self.cumulative_deployment_fraction <= 1.0):
+            raise ValueError("cumulative_deployment_fraction must be in (0, 1]")
+
+    @staticmethod
+    def validate_schedule(tiers: list[DeploymentTier]) -> None:
+        """Validate a complete tier schedule."""
+        if not tiers:
+            raise ValueError("At least one tier is required")
+        for i in range(1, len(tiers)):
+            if tiers[i].drawdown_threshold >= tiers[i - 1].drawdown_threshold:
+                raise ValueError("Thresholds must be strictly decreasing (deeper drawdowns)")
+            if tiers[i].cumulative_deployment_fraction < tiers[i - 1].cumulative_deployment_fraction:
+                raise ValueError("Cumulative fractions must be non-decreasing")
+
+
+@dataclass(frozen=True)
+class MarketDefinition:
+    """Separates the drawdown signal source (benchmark index) from the investable instrument.
+
+    The benchmark index determines: ATH, drawdown, threshold crossings, episode state.
+    The investable instrument determines: execution price, units, fees, final value.
+    """
+
+    benchmark_symbol: str
+    benchmark_name: str
+    benchmark_currency: str
+    benchmark_return_type: Literal["price_index", "net_total_return", "gross_total_return"]
+
+    instrument_symbol: str
+    instrument_name: str
+    instrument_currency: str
+
+    base_currency: str
+
+    _VALID_RETURN_TYPES = frozenset({"price_index", "net_total_return", "gross_total_return"})
+
+    def __post_init__(self) -> None:
+        if self.benchmark_return_type not in self._VALID_RETURN_TYPES:
+            raise ValueError(
+                f"benchmark_return_type must be one of {sorted(self._VALID_RETURN_TYPES)}, "
+                f"got {self.benchmark_return_type!r}"
+            )
 
 
 class AssetConfig(BaseModel):

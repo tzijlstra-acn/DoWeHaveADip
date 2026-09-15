@@ -16,8 +16,13 @@ sys.path.insert(0, str(ROOT / "src"))
 from dipdca.config import load_assets_config  # noqa: E402
 from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
 from dipdca.data.service import get_market_data_service  # noqa: E402
-from dipdca.models import SimulationParams  # noqa: E402
-from dipdca.quant.backtest import run_dca, run_tiered_dip, run_wait_for_dip  # noqa: E402
+from dipdca.models import DeploymentTier, SimulationParams  # noqa: E402
+from dipdca.quant.backtest import (  # noqa: E402
+    run_dca,
+    run_dip_deployment,
+    run_savings_only,
+    run_wait_for_dip,
+)
 from dipdca.quant.episodes import load_named_episodes  # noqa: E402
 from ui.charts import add_named_episode_labels, drawdown_chart, plot_strategy_wealth  # noqa: E402
 from ui.components import (  # noqa: E402
@@ -28,7 +33,7 @@ from ui.components import (  # noqa: E402
     strategy_comparison_cards,
     strategy_metrics,
 )
-from ui.copy import DISCLAIMER_SHORT, LABEL_DCA, LABEL_TIERED, LABEL_WAIT  # noqa: E402
+from ui.copy import DISCLAIMER_SHORT, LABEL_DCA, LABEL_WAIT  # noqa: E402
 from ui.design_tokens import NEUTRAL, POSITIVE, WARNING  # noqa: E402
 from ui.formatting import fmt_currency  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
@@ -128,7 +133,7 @@ except Exception as exc:
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_main, tab_tiered = st.tabs([f"{LABEL_DCA} vs {LABEL_WAIT}", LABEL_TIERED])
+tab_main, tab_tiered = st.tabs([f"{LABEL_DCA} vs {LABEL_WAIT}", "Dip deployment (cumulative)"])
 
 # ---------------------------------------------------------------------------
 # Tab 1: DCA vs Wait-for-Dip
@@ -138,6 +143,7 @@ with tab_main:
         try:
             dca_result, dca_ledger = run_dca(price_df, params)
             dip_result, dip_ledger = run_wait_for_dip(price_df, params)
+            savings_result, savings_ledger = run_savings_only(price_df, params)
         except Exception as exc:
             st.error(f"Backtest failed: {exc}")
             st.stop()
@@ -172,6 +178,9 @@ with tab_main:
 
     st.markdown(f"**{LABEL_WAIT}** (threshold: {dip_threshold:.0%})")
     strategy_metrics(dip_result)
+
+    st.markdown("**Savings account** (cash only — no investment)")
+    strategy_metrics(savings_result)
 
     st.divider()
 
@@ -223,53 +232,95 @@ with tab_main:
             )
 
 # ---------------------------------------------------------------------------
-# Tab 2: Tiered deployment
+# Tab 2: Dip deployment (cumulative model)
 # ---------------------------------------------------------------------------
 with tab_tiered:
     st.markdown(
-        "Tiered deployment invests a fixed fraction of accumulated cash at each dip level. "
-        "Configure tiers below."
+        "Dip deployment accumulates monthly savings in a savings account until a drawdown "
+        "threshold is crossed. At each level, a **cumulative** fraction of eligible saved "
+        "capital is deployed — so fractions refer to the total invested by that point, "
+        "not the fraction of remaining cash."
     )
 
-    st.subheader("Configure tiers")
-    tier_cols = st.columns(3)
-    tiers: list[tuple[float, float]] = []
-    default_tiers = [(-0.10, 0.33), (-0.20, 0.33), (-0.30, 0.34)]
-    for i, col in enumerate(tier_cols):
-        with col:
-            t_thresh = col.slider(
-                f"Tier {i+1} threshold (%)", min_value=-50, max_value=-1,
-                value=int(default_tiers[i][0] * 100), step=1, key=f"tier_thresh_{i}"
-            ) / 100.0
-            t_pct = col.slider(
-                f"Tier {i+1} deploy %", min_value=1, max_value=100,
-                value=int(default_tiers[i][1] * 100), step=1, key=f"tier_pct_{i}"
-            ) / 100.0
-            tiers.append((t_thresh, t_pct))
+    st.subheader("Configure deployment schedule")
 
-    if st.button("Run tiered backtest", type="primary"):
-        with st.spinner("Running tiered backtest..."):
+    default_tiers_df = pd.DataFrame({
+        "Drawdown threshold (%)": [-15, -25, -35],
+        "Total savings deployed by this level (%)": [25, 60, 100],
+    })
+
+    tiers_df = st.data_editor(
+        default_tiers_df,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="dip_deployment_tiers",
+        column_config={
+            "Drawdown threshold (%)": st.column_config.NumberColumn(
+                "Drawdown threshold (%)", min_value=-99, max_value=-1, step=1
+            ),
+            "Total savings deployed by this level (%)": st.column_config.NumberColumn(
+                "Total savings deployed by this level (%)", min_value=1, max_value=100, step=1
+            ),
+        },
+    )
+
+    st.caption(
+        "**Example:** With €20,000 saved and the 25%/60%/100% schedule:  \n"
+        "• At -15% drawdown → invest €5,000 (25% of €20,000)  \n"
+        "• At -25% drawdown → invest €7,000 more (total €12,000 = 60%)  \n"
+        "• At -35% drawdown → invest €8,000 more (total €20,000 = 100%)"
+    )
+
+    if st.button("Run dip deployment backtest", type="primary"):
+        # Validate and build DeploymentTier objects
+        try:
+            dip_tiers = [
+                DeploymentTier(
+                    drawdown_threshold=float(row["Drawdown threshold (%)"]) / 100.0,
+                    cumulative_deployment_fraction=float(row["Total savings deployed by this level (%)"]) / 100.0,
+                )
+                for _, row in tiers_df.iterrows()
+            ]
+            # Sort shallowest to deepest (most negative last)
+            dip_tiers = sorted(dip_tiers, key=lambda t: t.drawdown_threshold, reverse=True)
+            DeploymentTier.validate_schedule(dip_tiers)
+        except Exception as exc:
+            st.error(f"Invalid tier configuration: {exc}")
+            st.stop()
+
+        with st.spinner("Running dip deployment backtest..."):
             try:
-                tiered_result, tiered_ledger = run_tiered_dip(price_df, params, tiers=tiers)
+                dip_deploy_result, dip_deploy_ledger = run_dip_deployment(price_df, params, dip_tiers)
                 dca_result2, dca_ledger2 = run_dca(price_df, params)
+                savings_result2, _ = run_savings_only(price_df, params)
             except Exception as exc:
-                st.error(f"Tiered backtest failed: {exc}")
+                st.error(f"Backtest failed: {exc}")
                 st.stop()
 
-        diff2 = tiered_result.ending_wealth - dca_result2.ending_wealth
+        diff2 = dip_deploy_result.ending_wealth - dca_result2.ending_wealth
         conclusion2 = (
-            f"Tiered deployment ended {'ahead' if diff2 > 0 else 'behind'} by "
+            f"Dip deployment ended {'ahead' if diff2 > 0 else 'behind'} by "
             f"{fmt_currency(abs(diff2))} compared to monthly DCA."
         )
         st.info(conclusion2)
 
-        st.markdown(f"**{LABEL_TIERED}**")
-        strategy_metrics(tiered_result)
+        st.markdown("**Dip deployment**")
+        strategy_metrics(dip_deploy_result)
         st.markdown(f"**{LABEL_DCA} (baseline)**")
         strategy_metrics(dca_result2)
+        st.markdown("**Savings account (cash only)**")
+        strategy_metrics(savings_result2)
 
-        fig_t = plot_strategy_wealth(dca_ledger2, tiered_ledger, base_currency="EUR")
+        fig_t = plot_strategy_wealth(dca_ledger2, dip_deploy_ledger, base_currency="EUR")
         st.plotly_chart(fig_t, use_container_width=True)
+
+        deploy_dates2 = dip_deploy_ledger[dip_deploy_ledger["deployed"] > 0]
+        if not deploy_dates2.empty:
+            with st.expander(f"Deployment events ({len(deploy_dates2)} total)"):
+                disp2 = deploy_dates2[["deployed", "fees"]].copy()
+                disp2.index = disp2.index.date
+                disp2 = disp2.rename(columns={"deployed": "Deployed (EUR)", "fees": "Fees (EUR)"})
+                st.dataframe(disp2, use_container_width=True)
 
 st.divider()
 st.caption(DISCLAIMER_SHORT)
