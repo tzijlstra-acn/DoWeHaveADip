@@ -14,11 +14,12 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
+from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
 from dipdca.data.providers.deep_history import (  # noqa: E402
     DEEP_HISTORY_TICKERS,
     fetch_deep_history,
 )
-from dipdca.data.providers.yahoo import YahooProvider  # noqa: E402
+from dipdca.data.service import get_market_data_service  # noqa: E402
 from dipdca.models import SimulationParams  # noqa: E402
 from dipdca.quant.monte_carlo import (  # noqa: E402
     PathSimulation,
@@ -85,17 +86,19 @@ deploy_pcts = [float(d.replace("%", "")) / 100.0 for d in selected_deploys] or d
 # ---------------------------------------------------------------------------
 # Load ETF data (shared across Tab 1 and Tab 2)
 # ---------------------------------------------------------------------------
+from ui.components import freshness_caption, live_data_error  # noqa: E402
+
 with st.spinner(f"Fetching market data for {symbol}..."):
     try:
-        provider = YahooProvider()
-        price_data = provider.get_price_data(
+        _result = get_market_data_service().get_history(
             symbol, param_dict["start_date"], param_dict["end_date"]
         )
-        price_df = price_data.df
+        price_df = _result.frame
         data_source = f"Yahoo Finance ({symbol})"
-        as_of_date = price_data.as_of
-    except Exception as exc:
-        st.error(f"Could not load market data for {symbol}: {exc}")
+        as_of_date = _result.freshness.observed_at.date()
+        freshness_caption(_result.freshness)
+    except LiveDataUnavailable as exc:
+        live_data_error(exc, context=symbol)
         st.stop()
 
 start_ts = pd.Timestamp(param_dict["start_date"])

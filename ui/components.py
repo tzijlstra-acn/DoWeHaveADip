@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import datetime
+import traceback
 
 import streamlit as st
 
+from dipdca.data.errors import LiveDataUnavailable
+from dipdca.data.market_models import DataFreshness
 from dipdca.models import StrategyResult
 from ui.formatting import fmt_pct
 
@@ -17,6 +20,29 @@ def demo_banner() -> None:
         "Results are illustrative, not a representation of any real market.",
         icon="⚠️",
     )
+
+
+def live_data_error(error: LiveDataUnavailable, context: str = "") -> None:
+    """Render a live-data unavailable notice with Retry and collapsed technical details."""
+    location = f" ({context})" if context else ""
+    st.error(
+        f"**Live market data is unavailable{location}.** "
+        "No backup dataset is being shown. "
+        "Check your connection and retry, or return later.",
+        icon="🔌",
+    )
+    col_retry, col_space = st.columns([1, 4])
+    with col_retry:
+        if st.button("Retry", key=f"retry_{context}"):
+            st.cache_data.clear()
+            st.rerun()
+    with st.expander("Technical details"):
+        st.code(f"{type(error).__name__}: {error}\n\n{traceback.format_exc()}", language="text")
+
+
+def freshness_caption(freshness: DataFreshness) -> None:
+    """Render a one-line data freshness caption."""
+    st.caption(freshness.caption())
 
 
 def metric_card(
@@ -173,13 +199,20 @@ def sidebar_simulation_params() -> dict:
 
 
 def data_source_caption(
-    source: str, as_of: object, is_total_return: bool, currency: str
+    source: str,
+    as_of: object,
+    is_total_return: bool,
+    currency: str,
+    freshness: DataFreshness | None = None,
 ) -> None:
     """Render a small caption with data provenance info."""
-    tr_label = "Total Return (Adj.)" if is_total_return else "Price Only"
-    st.caption(
-        f"Data: {source} | Type: {tr_label} | Currency: {currency} | As of: {as_of}"
-    )
+    if freshness is not None:
+        st.caption(freshness.caption())
+    else:
+        tr_label = "Total Return (Adj.)" if is_total_return else "Price Only"
+        st.caption(
+            f"Data: {source} | Type: {tr_label} | Currency: {currency} | As of: {as_of}"
+        )
 
 
 def evidence_label(n: int) -> str:

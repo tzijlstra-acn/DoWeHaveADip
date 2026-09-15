@@ -11,7 +11,12 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
+import pandas as pd  # noqa: E402
+
+from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.service import get_market_data_service  # noqa: E402
 from dipdca.quant.drawdown import drawdown, drawdown_episodes, drawdown_label  # noqa: E402
+from ui.components import freshness_caption, live_data_error  # noqa: E402
 from ui.formatting import fmt_pct  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
@@ -96,39 +101,43 @@ st.write("")
 # ---------------------------------------------------------------------------
 from datetime import date  # noqa: E402
 
-from dipdca.data.providers.yahoo import YahooProvider  # noqa: E402
+_svc = get_market_data_service()
 
 with st.spinner("Fetching SPY market data..."):
+    _end = date.today()
+    _start = (_end - pd.DateOffset(years=1)).date()
     try:
-        provider = YahooProvider()
-        _end = date.today()
-        _start = date(_end.year - 1, _end.month, _end.day)
-        price_data = provider.get_price_data("SPY", _start, _end)
-        adj = price_data.df["adj_close"].dropna()
+        _result = _svc.get_history("SPY", _start, _end)
+        adj = _result.frame["adj_close"].dropna()
         dd_series = drawdown(adj)
         current_dd = float(dd_series.iloc[-1])
         label = drawdown_label(current_dd)
-        as_of = price_data.as_of
-    except Exception as exc:
-        st.error(f"Could not load market data. Check your internet connection. ({exc})")
-        st.stop()
+        as_of = _result.freshness.observed_at.date()
+        _spy_freshness = _result.freshness
+        _spy_load_ok = True
+    except LiveDataUnavailable as _exc:
+        _spy_load_ok = False
+        live_data_error(_exc, context="SPY")
+        dd_series = None
 
-color = "#00C896" if current_dd > -0.05 else ("#F47920" if current_dd > -0.20 else "#FF4B6B")
+if _spy_load_ok:
+    color = "#00C896" if current_dd > -0.05 else ("#F47920" if current_dd > -0.20 else "#FF4B6B")
 
-st.markdown(
-    f"""
-    <div style="border:2px solid {color}; border-radius:12px; padding:20px; text-align:center;
-                background:rgba(30,33,48,0.8); max-width:400px; margin:0 auto 24px auto">
-        <p style="margin:0;color:#aaa;font-size:0.85em">Live · SPY (S&amp;P 500)</p>
-        <h2 style="margin:8px 0;color:{color}">{fmt_pct(current_dd)}</h2>
-        <p style="margin:0;color:{color};font-weight:bold">{label}</p>
-        <p style="margin:4px 0;color:#6B7280;font-size:0.8em">from all-time high · as of {as_of}</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    st.markdown(
+        f"""
+        <div style="border:2px solid {color}; border-radius:12px; padding:20px; text-align:center;
+                    background:rgba(30,33,48,0.8); max-width:400px; margin:0 auto 24px auto">
+            <p style="margin:0;color:#aaa;font-size:0.85em">SPY (S&amp;P 500)</p>
+            <h2 style="margin:8px 0;color:{color}">{fmt_pct(current_dd)}</h2>
+            <p style="margin:0;color:{color};font-weight:bold">{label}</p>
+            <p style="margin:4px 0;color:#6B7280;font-size:0.8em">below the previous high · as of {as_of}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    freshness_caption(_spy_freshness)
 
-# Fear & Greed widget
+# Fear & Greed widget — optional, isolated; unavailability does not stop the page
 try:
     from dipdca.data.providers.fear_greed import (  # noqa: E402
         fetch_current_fear_greed,
@@ -155,23 +164,17 @@ try:
             """,
             unsafe_allow_html=True,
         )
-    else:
-        fg_manual = st.sidebar.slider(
-            "Fear & Greed (manual)",
-            0,
-            100,
-            50,
-            help="Enter the current CNN Fear & Greed Index reading manually if live fetch fails",
-        )
+except LiveDataUnavailable:
+    st.caption("Fear & Greed Index unavailable — live source could not be reached.")
 except Exception:
-    pass  # F&G widget is optional — never break the homepage
+    pass  # Other unexpected errors (import, JSON parse) — hide silently; F&G is non-critical
 
 st.divider()
 
 # ---------------------------------------------------------------------------
 # Recent dip episodes (live data)
 # ---------------------------------------------------------------------------
-if len(dd_series) > 10:
+if dd_series is not None and len(dd_series) > 10:
     st.markdown(
         """
         <h3 style="color:#FAFAFA; font-weight:700; margin-bottom:12px">

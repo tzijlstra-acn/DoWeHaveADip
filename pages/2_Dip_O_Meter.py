@@ -57,17 +57,19 @@ horizon_labels = {63: "3 months", 126: "6 months", 252: "1 year", 504: "2 years"
 # ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-from dipdca.data.providers.yahoo import YahooProvider  # noqa: E402
+from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.service import get_market_data_service  # noqa: E402
+from ui.components import freshness_caption, live_data_error  # noqa: E402
 
 with st.spinner(f"Fetching market data for {symbol}..."):
     try:
-        provider = YahooProvider()
-        price_data = provider.get_price_data(symbol, start_date, end_date)
-        price_df = price_data.df
+        _result = get_market_data_service().get_history(symbol, start_date, end_date)
+        price_df = _result.frame
         data_source = f"Yahoo Finance ({symbol})"
-        as_of_date = price_data.as_of
-    except Exception as exc:
-        st.error(f"Could not load market data for {symbol}: {exc}")
+        as_of_date = _result.freshness.observed_at.date()
+        freshness_caption(_result.freshness)
+    except LiveDataUnavailable as exc:
+        live_data_error(exc, context=symbol)
         st.stop()
 
 price_series = price_df["adj_close"].dropna()
