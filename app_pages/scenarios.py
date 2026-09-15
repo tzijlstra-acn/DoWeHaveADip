@@ -1,4 +1,4 @@
-"""Historical scenarios — parameter sweep and conditional path bootstrap."""
+﻿"""Historical scenarios — parameter sweep and conditional path bootstrap."""
 
 from __future__ import annotations
 
@@ -186,7 +186,7 @@ with tab_paths:
                 help="Fraction of historical draws where this strategy ended ahead of monthly DCA",
             )
             fig_fan = plot_fan_chart([sim], currency="EUR", horizon_months=cp_horizon)
-            st.plotly_chart(fig_fan, use_container_width=True)
+            st.plotly_chart(fig_fan, width="stretch")
 
     elif not cp_sims and st.session_state.get("scenarios_cp_sims"):
         st.info(
@@ -274,7 +274,7 @@ with tab_sweep:
             zmin=0.0,
             zmax=1.0,
         )
-        st.plotly_chart(fig_wr, use_container_width=True)
+        st.plotly_chart(fig_wr, width="stretch")
 
         st.subheader("Median outperformance vs DCA")
         op_pivot = outperformance_pivot(sweep_df)
@@ -283,10 +283,10 @@ with tab_sweep:
             title="Median outperformance vs DCA",
             colorscale="RdYlGn",
         )
-        st.plotly_chart(fig_op, use_container_width=True)
+        st.plotly_chart(fig_op, width="stretch")
 
         with st.expander("Raw sweep data"):
-            st.dataframe(sweep_df, use_container_width=True)
+            st.dataframe(sweep_df, width="stretch")
 
 st.divider()
 st.caption(DISCLAIMER_SHORT)

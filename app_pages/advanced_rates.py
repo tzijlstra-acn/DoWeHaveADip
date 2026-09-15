@@ -1,4 +1,4 @@
-"""Savings Rates — compare cash yields across NL / DE / CH."""
+﻿"""Savings Rates — compare cash yields across NL / DE / CH."""
 
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ st.write("")
 # ---------------------------------------------------------------------------
 st.subheader("Rate History")
 fig = plot_savings_rates(rates_df)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Break-even analysis

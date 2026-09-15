@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
+from typing import ClassVar, Literal
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -65,7 +65,7 @@ class MarketDefinition:
 
     base_currency: str
 
-    _VALID_RETURN_TYPES = frozenset({"price_index", "net_total_return", "gross_total_return"})
+    _VALID_RETURN_TYPES: ClassVar[frozenset[str]] = frozenset({"price_index", "net_total_return", "gross_total_return"})
 
     def __post_init__(self) -> None:
         if self.benchmark_return_type not in self._VALID_RETURN_TYPES:

@@ -1,4 +1,4 @@
-"""Market overview — browse all assets and their current drawdown status."""
+﻿"""Market overview — browse all assets and their current drawdown status."""
 
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ if series_dict:
     except Exception:
         pass  # Named episodes are optional — don't break the chart
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     as_of = list(price_frames.values())[0].index[-1].date()
     data_source_caption(
@@ -232,7 +232,7 @@ if len(first_adj) > 10:
         display_eps["trough_date"] = display_eps["trough_date"].dt.date
         display_eps["end"] = display_eps["end"].dt.date
         display_eps.columns = ["Start", "Trough Date", "Recovery / End", "Max Drawdown", "Duration (days)"]
-        st.dataframe(display_eps, use_container_width=True, hide_index=True)
+        st.dataframe(display_eps, width="stretch", hide_index=True)
 
         # Most recent episode callout
         last_ep = episodes_df.iloc[-1]
@@ -272,4 +272,4 @@ asset_rows = [
     }
     for a in assets
 ]
-st.dataframe(pd.DataFrame(asset_rows), use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(asset_rows), width="stretch", hide_index=True)

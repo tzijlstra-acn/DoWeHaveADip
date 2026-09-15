@@ -1,4 +1,4 @@
-"""Compare choices — head-to-head backtest: DCA vs Wait-for-dip vs Tiered."""
+﻿"""Compare choices — head-to-head backtest: DCA vs Wait-for-dip vs Tiered."""
 
 from __future__ import annotations
 
@@ -192,13 +192,13 @@ with tab_main:
         add_named_episode_labels(fig_wealth, named_eps, date_start=dca_ledger.index[0], date_end=dca_ledger.index[-1])
     except Exception:
         pass
-    st.plotly_chart(fig_wealth, use_container_width=True)
+    st.plotly_chart(fig_wealth, width="stretch")
 
     # Drawdown chart
     with st.expander("Drawdown history"):
         price_series = price_df["adj_close"].dropna()
         fig_dd = drawdown_chart(price_series, title=f"{selected_name} — Drawdown from High")
-        st.plotly_chart(fig_dd, use_container_width=True)
+        st.plotly_chart(fig_dd, width="stretch")
 
     # Deployment events
     deploy_dates = dip_ledger[dip_ledger["deployed"] > 0]
@@ -207,7 +207,7 @@ with tab_main:
             disp = deploy_dates[["deployed", "fees"]].copy()
             disp.index = disp.index.date
             disp = disp.rename(columns={"deployed": "Deployed (EUR)", "fees": "Fees (EUR)"})
-            st.dataframe(disp, use_container_width=True)
+            st.dataframe(disp, width="stretch")
 
     # Savings summary
     total_saved = float(monthly_contribution) * len(
@@ -252,7 +252,7 @@ with tab_tiered:
     tiers_df = st.data_editor(
         default_tiers_df,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key="dip_deployment_tiers",
         column_config={
             "Drawdown threshold (%)": st.column_config.NumberColumn(
@@ -312,7 +312,7 @@ with tab_tiered:
         strategy_metrics(savings_result2)
 
         fig_t = plot_strategy_wealth(dca_ledger2, dip_deploy_ledger, base_currency="EUR")
-        st.plotly_chart(fig_t, use_container_width=True)
+        st.plotly_chart(fig_t, width="stretch")
 
         deploy_dates2 = dip_deploy_ledger[dip_deploy_ledger["deployed"] > 0]
         if not deploy_dates2.empty:
@@ -320,7 +320,7 @@ with tab_tiered:
                 disp2 = deploy_dates2[["deployed", "fees"]].copy()
                 disp2.index = disp2.index.date
                 disp2 = disp2.rename(columns={"deployed": "Deployed (EUR)", "fees": "Fees (EUR)"})
-                st.dataframe(disp2, use_container_width=True)
+                st.dataframe(disp2, width="stretch")
 
 st.divider()
 st.caption(DISCLAIMER_SHORT)

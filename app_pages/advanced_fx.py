@@ -1,4 +1,4 @@
-"""Currency Reality Check — how FX affected your returns."""
+﻿"""Currency Reality Check — how FX affected your returns."""
 
 from __future__ import annotations
 
@@ -184,7 +184,7 @@ if residual > 1e-6:
 
 # Chart
 fig = plot_fx_decomposition(tr_native, fx_contribution, tr_base, base_currency=base_currency)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Hedged vs unhedged note

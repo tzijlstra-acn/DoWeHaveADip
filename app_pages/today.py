@@ -1,4 +1,4 @@
-"""Today — current drawdown status and historical context."""
+﻿"""Today — current drawdown status and historical context."""
 
 from __future__ import annotations
 
@@ -182,7 +182,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.subheader("Drawdown history")
 fig_dd = drawdown_chart(price_series, title=f"{selected_name} — Drawdown from High")
-st.plotly_chart(fig_dd, use_container_width=True)
+st.plotly_chart(fig_dd, width="stretch")
 
 st.divider()
 
@@ -225,7 +225,7 @@ else:
         n_periods = len([d for d in dd_series.index if abs(float(dd_series.loc[d]) - current_dd) <= 0.05])
         st.caption(f"Based on {n_periods} historical periods — {chart_label}")
         fig_fan = plot_fan_chart([sim], currency="EUR", horizon_months=12)
-        st.plotly_chart(fig_fan, use_container_width=True)
+        st.plotly_chart(fig_fan, width="stretch")
 
 # ---------------------------------------------------------------------------
 # CTA buttons

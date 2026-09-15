@@ -1,4 +1,4 @@
-"""Exit Laboratory — model exit strategies."""
+﻿"""Exit Laboratory — model exit strategies."""
 
 from __future__ import annotations
 
@@ -227,7 +227,7 @@ if exit_type != ExitType.NONE and exit_result_dip.get("exit_date"):
 
 apply_chart_layout(fig, title="Wealth Curves with Exit Markers (EUR)")
 fig.update_layout(xaxis_title="Date", yaxis_title="Wealth (EUR)", height=420)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Time in market comparison
@@ -248,10 +248,10 @@ st.subheader("Portfolio Drawdown")
 col_dd1, col_dd2 = st.columns(2)
 with col_dd1:
     fig_dd1 = drawdown_chart(dca_ledger["dd"], title="DCA Drawdown", threshold=params.dip_threshold)
-    st.plotly_chart(fig_dd1, use_container_width=True)
+    st.plotly_chart(fig_dd1, width="stretch")
 with col_dd2:
     fig_dd2 = drawdown_chart(dip_ledger["dd"], title="Dip Drawdown", threshold=params.dip_threshold)
-    st.plotly_chart(fig_dd2, use_container_width=True)
+    st.plotly_chart(fig_dd2, width="stretch")
 
 # ---------------------------------------------------------------------------
 # Exit rule descriptions
