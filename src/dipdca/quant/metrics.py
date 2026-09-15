@@ -69,7 +69,7 @@ def twr_cagr(flow_adj_returns: pd.Series, years: float) -> float | None:
     """
     if years <= 0 or len(flow_adj_returns) == 0:
         return None
-    total_return = float((1.0 + flow_adj_returns).prod())
+    total_return = float((1.0 + flow_adj_returns).prod())  # type: ignore[arg-type]
     if total_return <= 0:
         return None
     return float(total_return ** (1.0 / years) - 1.0)

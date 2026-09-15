@@ -67,6 +67,11 @@ def _apply_cost(
     return net, cost
 
 
+def _ledger_float(ledger: pd.DataFrame, idx: object, col: str) -> float:
+    """Read a scalar from ledger.at[] as float — isolates pandas-stubs arg-type suppression."""
+    return float(ledger.at[idx, col])  # type: ignore[arg-type]
+
+
 def _build_ledger_template(price_data: pd.DataFrame) -> pd.DataFrame:
     """Create an empty ledger DataFrame aligned to trading days.
 
@@ -353,7 +358,7 @@ def run_wait_for_dip(
         n_deployments += 1
         cash_flows.append((trading_days[0].date(), -params.initial_investment))
         ledger.at[trading_days[0], "external_flow"] = (
-            ledger.at[trading_days[0], "external_flow"] + params.initial_investment
+            _ledger_float(ledger, trading_days[0], "external_flow") + params.initial_investment
         )
         ledger.at[trading_days[0], "deployed"] = params.initial_investment
         ledger.at[trading_days[0], "fees"] = cost
@@ -401,8 +406,8 @@ def run_wait_for_dip(
                     remaining_spreads.append((target_dt, chunk))
             pending_spreads = remaining_spreads
             if spread_deployed_today > 0:
-                ledger.at[dt, "deployed"] = float(ledger.at[dt, "deployed"]) + spread_deployed_today
-                ledger.at[dt, "fees"] = float(ledger.at[dt, "fees"]) + fees_spread_today
+                ledger.at[dt, "deployed"] = _ledger_float(ledger, dt, "deployed") + spread_deployed_today
+                ledger.at[dt, "fees"] = _ledger_float(ledger, dt, "fees") + fees_spread_today
 
         # 3b. Check dip signal (t-1 signal → t execution)
         if cash > 0 and i > 0:
@@ -436,8 +441,8 @@ def run_wait_for_dip(
                         units += net / p
                         total_fees += cost
                         n_deployments += 1
-                        ledger.at[dt, "deployed"] = float(ledger.at[dt, "deployed"]) + amount_to_deploy
-                        ledger.at[dt, "fees"] = float(ledger.at[dt, "fees"]) + cost
+                        ledger.at[dt, "deployed"] = _ledger_float(ledger, dt, "deployed") + amount_to_deploy
+                        ledger.at[dt, "fees"] = _ledger_float(ledger, dt, "fees") + cost
                         cash -= amount_to_deploy
                     else:
                         chunk = amount_to_deploy / params.deploy_spread_months
@@ -550,7 +555,7 @@ def run_tiered_dip(
         n_deployments += 1
         cash_flows.append((trading_days[0].date(), -params.initial_investment))
         ledger.at[trading_days[0], "external_flow"] = (
-            float(ledger.at[trading_days[0], "external_flow"]) + params.initial_investment
+            _ledger_float(ledger, trading_days[0], "external_flow") + params.initial_investment
         )
         ledger.at[trading_days[0], "deployed"] = params.initial_investment
         ledger.at[trading_days[0], "fees"] = cost
@@ -616,8 +621,8 @@ def run_tiered_dip(
                             tiers_triggered.add(j)
 
                 if deployed_this_step > 0:
-                    ledger.at[dt, "deployed"] = float(ledger.at[dt, "deployed"]) + deployed_this_step
-                    ledger.at[dt, "fees"] = float(ledger.at[dt, "fees"]) + fees_this_step
+                    ledger.at[dt, "deployed"] = _ledger_float(ledger, dt, "deployed") + deployed_this_step
+                    ledger.at[dt, "fees"] = _ledger_float(ledger, dt, "fees") + fees_this_step
 
         # 4. Value portfolio
         market_val = units * p
