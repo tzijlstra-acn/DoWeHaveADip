@@ -21,8 +21,8 @@ from ui.theme import GLOBAL_CSS  # noqa: E402
 st.set_page_config(page_title="Savings Rates", page_icon="🏦", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header(
-    "Savings Rates",
-    "What does your cash actually earn while you wait for the dip? Official ECB / SNB deposit rates.",
+    "Interest Rates",
+    "Official ECB household deposit rates and SNB policy rate — not retail savings account rates.",
     "🏦",
 )
 
@@ -55,7 +55,7 @@ from dipdca.data.providers.snb_rates import SnbRatesProvider  # noqa: E402
 
 rates_dict: dict[str, pd.Series] = {}
 
-with st.spinner("Fetching savings rates from ECB and SNB..."):
+with st.spinner("Fetching interest rates from ECB and SNB..."):
     # ECB MIR (MFI Interest Rates) — household overnight deposits
     for country_code, flow_ref, key in [
         ("DE", "MIR", "M.DE.B.L22.A.R.A.2250.EUR.N"),
@@ -83,7 +83,7 @@ with st.spinner("Fetching savings rates from ECB and SNB..."):
         snb = SnbRatesProvider()
         snb_series = snb.get_policy_rate(start_date, end_date)
         snb_monthly = snb_series.resample("ME").last()
-        rates_dict["CH (SNB policy rate)"] = snb_monthly
+        rates_dict["CH (SNB sight deposit rate — policy, not retail)"] = snb_monthly
     except Exception as exc:
         st.warning(f"SNB fetch failed: {exc}")
 
@@ -93,7 +93,7 @@ if not rates_dict:
 
 # Add manual rate overlay
 if manual_override:
-    idx_m = pd.date_range(start_date, end_date, freq="M")
+    idx_m = pd.date_range(start_date, end_date, freq="ME")
     rates_dict[manual_label] = pd.Series(manual_rate, index=idx_m)
 
 if not rates_dict:

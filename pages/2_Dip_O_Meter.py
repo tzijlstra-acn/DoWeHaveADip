@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -57,17 +59,19 @@ horizon_labels = {63: "3 months", 126: "6 months", 252: "1 year", 504: "2 years"
 # ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-from dipdca.data.providers.yahoo import YahooProvider  # noqa: E402
+from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.service import get_market_data_service  # noqa: E402
+from ui.components import freshness_caption, live_data_error  # noqa: E402
 
 with st.spinner(f"Fetching market data for {symbol}..."):
     try:
-        provider = YahooProvider()
-        price_data = provider.get_price_data(symbol, start_date, end_date)
-        price_df = price_data.df
+        _result = get_market_data_service().get_history(symbol, start_date, end_date)
+        price_df = _result.frame
         data_source = f"Yahoo Finance ({symbol})"
-        as_of_date = price_data.as_of
-    except Exception as exc:
-        st.error(f"Could not load market data for {symbol}: {exc}")
+        as_of_date = _result.freshness.observed_at.date()
+        freshness_caption(_result.freshness)
+    except LiveDataUnavailable as exc:
+        live_data_error(exc, context=symbol)
         st.stop()
 
 price_series = price_df["adj_close"].dropna()
@@ -253,13 +257,18 @@ if not episodes.empty and "fwd_1_year" in fwd_df.columns:
             )
 
         with col_ci:
-            # Simple Wilson CI
+            # Wilson CI using scipy.stats.norm (no statsmodels dependency)
             if n_obs >= 5:
-                from scipy import stats as scipy_stats
+                from scipy.stats import norm as _norm
 
-                ci = scipy_stats.proportion_confint(
-                    int(p_beat * n_obs), n_obs, alpha=0.1, method="wilson"
-                )
+                z = _norm.ppf(0.95)  # z for 90% two-sided CI
+                k = round(p_beat * n_obs)
+                p_hat = k / n_obs
+                z2 = z * z
+                denom = 1 + z2 / n_obs
+                centre = (p_hat + z2 / (2 * n_obs)) / denom
+                margin = z * ((p_hat * (1 - p_hat) / n_obs + z2 / (4 * n_obs**2)) ** 0.5) / denom
+                ci = (max(0.0, centre - margin), min(1.0, centre + margin))
                 st.metric("90% CI lower", f"{ci[0]:.0%}")
                 st.metric("90% CI upper", f"{ci[1]:.0%}")
                 st.caption(
@@ -287,15 +296,14 @@ if not episodes.empty:
 # ---------------------------------------------------------------------------
 if not episodes.empty:
     st.divider()
-    with st.expander("What happens if you deploy now?", expanded=False):
+    with st.expander("Historical Scenarios: What if you invest now?", expanded=False):
         st.markdown(
             f"""
             <div style="background:#1E2130; border:1px solid #2D3047; border-radius:10px;
                         padding:12px; margin-bottom:12px">
                 <b style="color:#F47920">Current drawdown: {current_dd:.1%}</b>
-                <span style="color:#9CA3AF"> — Bootstrap question:
-                given we're at this drawdown level, what have historical continuation paths
-                looked like depending on how much cash you deploy now?</span>
+                <span style="color:#9CA3AF"> — Looking at past market periods with a similar
+                drop, what happened next depending on how much cash you invested?</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -341,7 +349,19 @@ if not episodes.empty:
             or [0.25, 0.50, 0.75, 1.00]
         )
 
-        if st.button("Run conditional path bootstrap", key="dip_run_cp"):
+        _cp_fp = hashlib.sha256(
+            json.dumps(
+                {
+                    "symbol": symbol, "start": str(start_date), "end": str(end_date),
+                    "threshold": threshold, "monthly": cp_monthly, "cash": round(cp_cash),
+                    "horizon": cp_horizon, "deploys": sorted(cp_deploy_pcts),
+                    "current_dd": round(current_dd, 4),
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:16]
+
+        if st.button("Run historical scenario simulation", key="dip_run_cp"):
             with st.spinner(
                 f"Bootstrapping paths from {current_dd:.0%} historical entries..."
             ):
@@ -354,21 +374,30 @@ if not episodes.empty:
                     horizon_months=cp_horizon,
                     n_simulations=500,
                 )
-            st.session_state["dip_cp_sims"] = [
-                {
-                    "deploy_pct": s.deploy_pct,
-                    "p5_wealth": s.p5_wealth.tolist(),
-                    "p25_wealth": s.p25_wealth.tolist(),
-                    "p50_wealth": s.p50_wealth.tolist(),
-                    "p75_wealth": s.p75_wealth.tolist(),
-                    "p95_wealth": s.p95_wealth.tolist(),
-                    "prob_beats_dca": s.prob_beats_dca,
-                    "horizon_months": s.horizon_months,
-                }
-                for s in cp_sims
-            ]
+            st.session_state["dip_cp_sims"] = {
+                "fp": _cp_fp,
+                "data": [
+                    {
+                        "deploy_pct": s.deploy_pct,
+                        "p5_wealth": s.p5_wealth.tolist(),
+                        "p25_wealth": s.p25_wealth.tolist(),
+                        "p50_wealth": s.p50_wealth.tolist(),
+                        "p75_wealth": s.p75_wealth.tolist(),
+                        "p95_wealth": s.p95_wealth.tolist(),
+                        "prob_beats_dca": s.prob_beats_dca,
+                        "horizon_months": s.horizon_months,
+                    }
+                    for s in cp_sims
+                ],
+            }
 
-        cp_dicts = st.session_state.get("dip_cp_sims", [])
+        _stored_cp = st.session_state.get("dip_cp_sims")
+        if _stored_cp and isinstance(_stored_cp, dict) and _stored_cp.get("fp") == _cp_fp:
+            cp_dicts = _stored_cp["data"]
+        else:
+            if _stored_cp:
+                st.info("Parameters changed — click Run to update results.")
+            cp_dicts = []
         if cp_dicts:
             cp_path_sims = [
                 PathSimulation(
@@ -400,8 +429,8 @@ if not episodes.empty:
                         "Deploy %": f"{s.deploy_pct:.0%}",
                         "P(beats DCA)": f"{s.prob_beats_dca:.0%}",
                         "Median Wealth": f"EUR {s.p50_wealth[-1]:,.0f}",
-                        "P5 (Worst)": f"EUR {s.p5_wealth[-1]:,.0f}",
-                        "P95 (Best)": f"EUR {s.p95_wealth[-1]:,.0f}",
+                        "P5 (Worst 1-in-20)": f"EUR {s.p5_wealth[-1]:,.0f}",
+                        "P95 (Best 1-in-20)": f"EUR {s.p95_wealth[-1]:,.0f}",
                     }
                 )
             st.dataframe(
@@ -411,7 +440,7 @@ if not episodes.empty:
             st.caption(
                 f"Based on {len(episodes)} historical entry points at "
                 f"drawdown levels near {current_dd:.0%}. "
-                "500 bootstrap paths per deploy fraction. Not a forecast."
+                "500 sampled historical paths per option. Not a forecast."
             )
 
 # ---------------------------------------------------------------------------

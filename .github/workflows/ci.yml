@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, "feat/**"]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   test:
@@ -19,22 +19,26 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
-          version: "latest"
+          version: "0.5.4"
 
       - name: Set up Python
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra dev
-
-      - name: Generate fixtures
-        run: uv run python data/fixtures/generate.py
+        run: uv sync --frozen --extra dev
 
       - name: Lint (ruff)
         run: uv run ruff check .
 
-      - name: Run tests
-        run: uv run pytest -q --tb=short
+      - name: Type check (mypy)
+        run: uv run mypy src/dipdca
 
-      - name: Check test coverage
-        run: uv run pytest --cov=src/dipdca --cov-report=term-missing -q
+      - name: Run tests with coverage
+        run: uv run pytest -q --tb=short --cov=src/dipdca --cov-report=term-missing
+
+      - name: Streamlit smoke test
+        run: |
+          uv run streamlit run app.py --server.headless true --server.port 8502 &
+          sleep 12
+          curl -f http://localhost:8502/_stcore/health
+          kill %1 || true

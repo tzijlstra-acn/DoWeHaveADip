@@ -71,7 +71,7 @@ def run_dca(
         Tuple of (StrategyResult, day-by-day ledger DataFrame).
     """
     prices = price_data["adj_close"].copy()
-    trading_days = prices.index
+    trading_days: pd.DatetimeIndex = pd.DatetimeIndex(prices.index)
 
     schedule = build_contribution_schedule(
         params.start_date,
@@ -205,7 +205,7 @@ def run_wait_for_dip(
         Tuple of (StrategyResult, ledger DataFrame).
     """
     prices = price_data["adj_close"].copy()
-    trading_days = prices.index
+    trading_days: pd.DatetimeIndex = pd.DatetimeIndex(prices.index)
 
     schedule = build_contribution_schedule(
         params.start_date,
@@ -297,7 +297,7 @@ def run_wait_for_dip(
                     remaining_spreads.append((target_dt, chunk))
             pending_spreads = remaining_spreads
             if spread_deployed_today > 0:
-                existing_deployed = float(ledger.at[dt, "deployed"]) if ledger.at[dt, "deployed"] != 0 else 0.0
+                existing_deployed = float(ledger.at[dt, "deployed"]) if ledger.at[dt, "deployed"] != 0 else 0.0  # type: ignore[arg-type]
                 ledger.at[dt, "deployed"] = existing_deployed + spread_deployed_today
 
         if cash > 0 and i > 0:
@@ -403,7 +403,7 @@ def run_tiered_dip(
         Tuple of (StrategyResult, ledger DataFrame).
     """
     prices = price_data["adj_close"].copy()
-    trading_days = prices.index
+    trading_days: pd.DatetimeIndex = pd.DatetimeIndex(prices.index)
 
     # Sort tiers from shallowest to deepest
     tiers_sorted = sorted(tiers, key=lambda t: t["threshold"], reverse=True)

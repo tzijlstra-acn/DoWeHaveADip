@@ -30,7 +30,7 @@ def normalize_total_return(
         pos = adj_close.index.searchsorted(t0)
         if pos >= len(adj_close.index):
             raise ValueError(f"t0={t0} is beyond the price series range")
-        t0 = adj_close.index[pos]
+        t0 = pd.Timestamp(adj_close.index[int(pos)])
 
     fx_aligned = fx.reindex(adj_close.index, method="ffill")
 

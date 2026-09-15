@@ -12,7 +12,10 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
+
 from dipdca.config import load_assets_config  # noqa: E402
+from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.service import get_market_data_service  # noqa: E402
 from dipdca.quant.drawdown import drawdown, drawdown_episodes, drawdown_label  # noqa: E402
 from dipdca.quant.episodes import load_named_episodes  # noqa: E402
 from ui.charts import add_dip_highlights, add_named_episode_labels, total_return_chart  # noqa: E402
@@ -25,32 +28,37 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header("Market Arcade", "Browse assets and see their current drawdown status.", "🕹️")
 
 
-def load_live_prices(assets: list[dict]) -> dict[str, pd.DataFrame]:
-    """Load live Yahoo Finance data for all assets."""
+def load_live_prices(assets: list[dict]) -> tuple[dict[str, pd.DataFrame], list[str]]:
+    """Load live market data for all assets. Returns (data_dict, error_list)."""
     from datetime import date
 
-    from dipdca.data.providers.yahoo import YahooProvider
-
-    provider = YahooProvider()
+    svc = get_market_data_service()
     end = date.today()
-    start = date(end.year - 3, end.month, end.day)
+    start = (end - pd.DateOffset(years=3)).date()  # leap-day safe
 
-    live_data = {}
+    live_data: dict[str, pd.DataFrame] = {}
+    errors: list[str] = []
     for asset in assets:
         symbol = asset["etf_symbol"]
+        name = asset["display_name"]
         try:
-            price_data = provider.get_price_data(symbol, start, end)
-            live_data[asset["display_name"]] = price_data.df
-        except Exception:
-            pass  # Skip unavailable assets; warn below
-    return live_data
+            result = svc.get_history(symbol, start, end)
+            live_data[name] = result.frame
+        except LiveDataUnavailable as exc:
+            errors.append(f"{name} ({symbol}): {exc}")
+    return live_data, errors
 
 
 # Load data
 assets = load_assets_config()
 
 with st.spinner("Fetching market data from Yahoo Finance..."):
-    price_frames = load_live_prices(assets)
+    price_frames, load_errors = load_live_prices(assets)
+
+if load_errors:
+    with st.expander(f"{len(load_errors)} asset(s) could not be loaded"):
+        for err in load_errors:
+            st.caption(f"- {err}")
 
 if not price_frames:
     st.error("Could not load any market data. Check your internet connection.")
@@ -103,7 +111,7 @@ for i, (name, df) in enumerate(price_frames.items()):
                 <h4 style="margin:0; color:#FAFAFA">{name}</h4>
                 <p style="margin:6px 0; font-size:1.8em; color:{color}; font-weight:800; line-height:1">{fmt_pct(current_dd)}</p>
                 <p style="margin:0; color:#9CA3AF; font-size:0.85em">{label}</p>
-                <p style="margin:4px 0; color:#6B7280; font-size:0.8em">Last: {last_price:.2f} | {days_since_high}d from ATH</p>
+                <p style="margin:4px 0; color:#6B7280; font-size:0.8em">Last: {last_price:.2f} | {days_since_high} calendar days from high</p>
                 <span style="background:{trigger_color}22; border:1px solid {trigger_color};
                              border-radius:4px; padding:2px 8px; color:{trigger_color};
                              font-size:0.8em; font-weight:600">{trigger_str}</span>

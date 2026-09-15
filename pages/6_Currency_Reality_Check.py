@@ -90,7 +90,9 @@ st.info(
 )
 
 # Load price data
-from dipdca.data.providers.yahoo import YahooProvider  # noqa: E402
+from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.service import get_market_data_service  # noqa: E402
+from ui.components import freshness_caption, live_data_error  # noqa: E402
 
 symbol = selected_asset.get("etf_symbol") or selected_asset.get("index_symbol")
 if not symbol:
@@ -99,12 +101,12 @@ if not symbol:
 
 with st.spinner(f"Fetching price data for {symbol}..."):
     try:
-        provider = YahooProvider()
-        price_data = provider.get_price_data(symbol, start_date, end_date)
-        price_df = price_data.df
+        _result = get_market_data_service().get_history(symbol, start_date, end_date)
+        price_df = _result.frame
         data_source = f"Yahoo Finance ({symbol})"
-    except Exception as exc:
-        st.error(f"Could not load market data for {symbol}: {exc}")
+        freshness_caption(_result.freshness)
+    except LiveDataUnavailable as exc:
+        live_data_error(exc, context=symbol)
         st.stop()
 
 price_df = price_df.loc[pd.Timestamp(start_date): pd.Timestamp(end_date)]
@@ -129,13 +131,22 @@ if asset_currency == base_currency:
 elif base_currency == "EUR" and asset_currency in fx_df.columns:
     # ECB gives USD_per_EUR, so EUR_per_USD = 1 / USD_per_EUR
     eur_per_asset = 1.0 / fx_df[asset_currency]
-    fx_rate = eur_per_asset.reindex(adj.index, method="ffill").fillna(method="bfill")
+    fx_rate = eur_per_asset.reindex(adj.index, method="ffill").bfill()
 elif asset_currency == "EUR" and base_currency in fx_df.columns:
     # fx_df gives base_per_EUR
-    fx_rate = fx_df[base_currency].reindex(adj.index, method="ffill").fillna(method="bfill")
+    fx_rate = fx_df[base_currency].reindex(adj.index, method="ffill").bfill()
+elif base_currency in fx_df.columns and asset_currency in fx_df.columns:
+    # Triangulate through EUR: base_per_asset = base_per_eur / asset_per_eur
+    base_per_eur = fx_df[base_currency]
+    asset_per_eur = fx_df[asset_currency]
+    cross = base_per_eur / asset_per_eur
+    fx_rate = cross.reindex(adj.index, method="ffill").bfill()
 else:
-    fx_rate = pd.Series(1.0, index=adj.index)
-    st.warning(f"Could not find FX rate for {asset_currency}/{base_currency}. Assuming 1:1.")
+    st.error(
+        f"FX rate for {asset_currency}/{base_currency} is not available from the live ECB source. "
+        "No results will be shown until the data source can be reached."
+    )
+    st.stop()
 
 # Align
 adj_aligned = adj.copy()
@@ -191,7 +202,8 @@ else:
     st.info(
         f"**{selected_name}** is **not currency-hedged**. "
         "The FX contribution shown above is a real component of your return. "
-        "A weak {asset_currency} vs {base_currency} erodes returns; a strong {asset_currency} amplifies them."
+        f"A weak {asset_currency} vs {base_currency} erodes returns; "
+        f"a strong {asset_currency} amplifies them."
     )
 
 # ---------------------------------------------------------------------------

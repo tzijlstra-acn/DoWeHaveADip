@@ -1,35 +1,32 @@
-"""Abstract base class for data providers."""
+"""Provider protocol for live market data sources."""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from datetime import date
+from typing import Protocol
 
-from dipdca.models import PriceData
+from dipdca.data.market_models import PriceDataResult
 
 
-class BaseProvider(ABC):
-    """Base interface for market data providers."""
+class MarketDataProvider(Protocol):
+    """Protocol that all market data providers must satisfy."""
 
-    @abstractmethod
-    def get_price_data(self, symbol: str, start: date, end: date) -> PriceData:
-        """Fetch OHLCV price data for a symbol.
-
-        Args:
-            symbol: Ticker symbol.
-            start: Start date (inclusive).
-            end: End date (inclusive).
+    def get_history(self, symbol: str, start: date, end: date) -> PriceDataResult:
+        """Fetch adjusted price history for symbol in [start, end].
 
         Returns:
-            PriceData with adj_close column and DatetimeIndex.
+            PriceDataResult with a sorted DatetimeIndex and adj_close column.
+
+        Raises:
+            LiveDataUnavailable: If the source cannot be reached or returns bad data.
+            StaleLiveData: If the most recent observation is too old.
         """
         ...
 
-    @abstractmethod
-    def get_latest_price(self, symbol: str) -> tuple[float, date]:
-        """Return (latest_close, as_of_date)."""
-        ...
+    def get_latest(self, symbol: str) -> PriceDataResult:
+        """Fetch the latest available close price.
 
-    def is_available(self) -> bool:
-        """Check if provider can reach its data source."""
-        return True
+        Raises:
+            LiveDataUnavailable: If the source cannot be reached.
+        """
+        ...
