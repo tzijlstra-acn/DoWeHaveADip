@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from ui.charts import plot_savings_rates  # noqa: E402
 from ui.components import data_source_caption, page_header  # noqa: E402
+from ui.design_tokens import NEGATIVE, POSITIVE, TEXT_MUTED, WARNING  # noqa: E402
 from ui.formatting import fmt_pct  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
@@ -114,13 +115,13 @@ for i, (name, series) in enumerate(rates_dict.items()):
     col = cols[i % len(cols)]
     with col:
         short_name = name.split(" (")[0]
-        color = "#00C896" if latest_rate > 0.02 else ("#F47920" if latest_rate > 0.005 else "#FF4B6B")
+        color = POSITIVE if latest_rate > 0.02 else (WARNING if latest_rate > 0.005 else NEGATIVE)
         st.markdown(
             f"""
             <div style="border:1px solid {color}; border-radius:8px; padding:12px; text-align:center;">
-                <p style="margin:0;color:#aaa;font-size:0.8em">{name}</p>
-                <h2 style="margin:6px 0;color:{color}">{latest_rate:.2%}</h2>
-                <p style="margin:0;color:#888;font-size:0.75em">as of {latest_date} (monthly)</p>
+                <p style="margin:0;color:{TEXT_MUTED};font-size:0.8em">{name}</p>
+                <h2 style="margin:6px 0;color:{color};font-variant-numeric:tabular-nums">{latest_rate:.2%}</h2>
+                <p style="margin:0;color:{TEXT_MUTED};font-size:0.75em">as of {latest_date} (monthly)</p>
             </div>
             """,
             unsafe_allow_html=True,

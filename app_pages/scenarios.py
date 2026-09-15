@@ -8,7 +8,6 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import streamlit as st
 
 ROOT = Path(__file__).parent.parent
@@ -38,9 +37,9 @@ from ui.theme import GLOBAL_CSS  # noqa: E402
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header(
-    "Historical scenarios",
-    "We find past market states with a similar drawdown and show what happened next. "
-    "This is real historical data — not a prediction.",
+    "HISTORICAL SCENARIOS",
+    "Past market states with a similar drawdown — what happened next. "
+    "Real data, not a prediction.",
 )
 
 # ---------------------------------------------------------------------------
@@ -174,13 +173,13 @@ with tab_paths:
             st.subheader(dlabel)
             cols_m = st.columns(3)
             with cols_m[0]:
-                st.metric("Bad case (P10)", f"EUR {np.percentile(np.array([sim.p50_wealth[-1]]), 50):,.0f}",
-                          help="10th percentile outcome at end of horizon")
+                st.metric("Worst case (P5)", f"EUR {sim.p5_wealth[-1]:,.0f}",
+                          help="5th percentile outcome at end of horizon — 1-in-20 bad draw")
             with cols_m[1]:
                 st.metric("Typical (P50)", f"EUR {sim.p50_wealth[-1]:,.0f}")
             with cols_m[2]:
-                st.metric("Good case (P90)", f"EUR {sim.p95_wealth[-1]:,.0f}",
-                          help="90th percentile outcome at end of horizon")
+                st.metric("Best case (P95)", f"EUR {sim.p95_wealth[-1]:,.0f}",
+                          help="95th percentile outcome at end of horizon — 1-in-20 good draw")
             st.metric(
                 "Beat monthly DCA",
                 f"{sim.prob_beats_dca:.0%}",

@@ -17,7 +17,7 @@ from ui.theme import GLOBAL_CSS  # noqa: E402
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header(
-    "How it works",
+    "HOW IT WORKS",
     "Methodology, data sources, formulas, and assumptions behind the numbers.",
 )
 

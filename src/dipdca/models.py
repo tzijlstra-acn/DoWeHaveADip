@@ -44,7 +44,8 @@ class SimulationParams(BaseModel):
 
     monthly_contribution: float = Field(gt=0, description="EUR/CHF contributed each month")
     payday: int = Field(ge=1, le=28, description="Day of month salary arrives")
-    initial_investment: float = Field(ge=0, default=0.0)
+    initial_investment: float = Field(ge=0, default=0.0, description="Lump sum deployed immediately on day 1 in all strategies")
+    initial_cash_reserve: float = Field(ge=0, default=0.0, description="Cash held waiting for dip in dip strategies; deployed on day 1 in DCA")
     country: str = "NL"
     base_currency: str = "EUR"
     start_date: date = date(2010, 1, 1)
@@ -89,11 +90,20 @@ class StrategyResult(BaseModel):
     ending_cash: float
     ending_market_value: float
     pnl: float
+    # Money-weighted return (investor IRR including contribution timing)
     xirr: float | None = None
+    # Simple CAGR approximation: (end_wealth/total_contributions)^(1/years)-1
+    # Not a true time-weighted rate; use twr for a proper time-weighted measure
     cagr: float | None = None
+    # Time-weighted CAGR from flow-adjusted NAV (deposit-corrected)
+    twr: float | None = None
+    # Sharpe and Sortino computed from flow-adjusted returns
     sharpe: float | None = None
     sortino: float | None = None
+    # Drawdown from raw wealth (contains deposit contamination — legacy)
     max_drawdown: float
+    # Drawdown from unitized NAV (flow-adjusted — correct)
+    nav_mdd: float | None = None
     time_in_market_pct: float
     n_deployments: int
     total_fees: float

@@ -18,13 +18,27 @@ from dipdca.data.service import get_market_data_service  # noqa: E402
 from dipdca.quant.drawdown import drawdown, drawdown_episodes  # noqa: E402
 from dipdca.quant.monte_carlo import conditional_path_bootstrap  # noqa: E402
 from ui.charts import drawdown_chart, plot_fan_chart  # noqa: E402
-from ui.components import freshness_caption, live_data_error  # noqa: E402
-from ui.copy import DISCLAIMER_SHORT, drawdown_label  # noqa: E402
-from ui.design_tokens import NEGATIVE, NEUTRAL, POSITIVE, WARNING  # noqa: E402
+from ui.components import (  # noqa: E402
+    freshness_caption,
+    live_data_error,
+    page_header,
+    signal_card,
+)
+from ui.copy import DISCLAIMER_SHORT  # noqa: E402
+from ui.design_tokens import (  # noqa: E402
+    NEGATIVE,
+    NEUTRAL,
+    POSITIVE,
+    WARNING,
+)
 from ui.formatting import fmt_pct  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+page_header(
+    "DO WE HAVE A DIP?",
+    "Market pressure, measured. Current drawdown status and what history says about similar periods.",
+)
 
 # ---------------------------------------------------------------------------
 # Inputs — all in main column (no sidebar)
@@ -119,23 +133,24 @@ else:
     direction_text = "below its previous high"
     dd_display = fmt_pct(current_dd)
 
-label = drawdown_label(current_dd)
+if abs(current_dd) < 0.001:
+    status_label = "AT THE HIGH"
+elif current_dd <= dip_threshold:
+    status_label = "THRESHOLD HIT" if current_dd > dip_threshold * 1.5 else "DEEP DRAWDOWN"
+elif current_dd <= dip_threshold * 0.5:
+    status_label = "APPROACHING"
+else:
+    status_label = "NO SIGNAL YET"
 
-st.markdown(
-    f"""
-    <div style="background:#FFFFFF; border:1px solid {hero_color};
-                border-radius:12px; padding:28px 32px; margin:16px 0 24px 0;">
-        <p style="margin:0; color:#6B7280; font-size:0.9em">{selected_name} ({symbol})</p>
-        <h2 style="margin:8px 0; font-size:2.2em; font-weight:800; color:{hero_color}">
-            {dd_display}
-        </h2>
-        <p style="margin:0; color:#374151; font-size:1.05em">
-            {direction_text}
-        </p>
-        <p style="margin:6px 0 0; color:#9CA3AF; font-size:0.85em">{label}</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
+distance = current_dd - dip_threshold  # positive = still above threshold
+
+signal_card(
+    status_label=status_label,
+    drawdown_pct=current_dd,
+    threshold_pct=dip_threshold,
+    days_since_high=days_since_high,
+    distance_to_threshold_pct=distance,
+    status_color=hero_color,
 )
 
 # ---------------------------------------------------------------------------

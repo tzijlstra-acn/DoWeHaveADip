@@ -20,6 +20,16 @@ from dipdca.quant.drawdown import drawdown, drawdown_episodes, drawdown_label  #
 from dipdca.quant.episodes import load_named_episodes  # noqa: E402
 from ui.charts import add_dip_highlights, add_named_episode_labels, total_return_chart  # noqa: E402
 from ui.components import data_source_caption, page_header  # noqa: E402
+from ui.design_tokens import (  # noqa: E402
+    ACCENT_CYAN,
+    BG_SURFACE_RAISED,
+    NEGATIVE,
+    POSITIVE,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+    WARNING,
+)
 from ui.formatting import fmt_pct  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
@@ -75,10 +85,7 @@ highlight_threshold = (
 # ---------------------------------------------------------------------------
 # Current Drawdown Status Banner
 # ---------------------------------------------------------------------------
-st.markdown(
-    '<h3 style="color:#FAFAFA; font-weight:700; margin-bottom:4px">Current Drawdown Status</h3>',
-    unsafe_allow_html=True,
-)
+st.subheader("Current Drawdown Status")
 
 cols = st.columns(min(len(price_frames), 3))
 for i, (name, df) in enumerate(price_frames.items()):
@@ -98,19 +105,20 @@ for i, (name, df) in enumerate(price_frames.items()):
                 break
             days_since_high += 1
 
-        color = "#00C896" if current_dd > -0.05 else ("#F47920" if current_dd > -0.20 else "#FF4B6B")
+        color = POSITIVE if current_dd > -0.05 else (WARNING if current_dd > -0.20 else NEGATIVE)
         triggered = current_dd <= highlight_threshold
         trigger_str = f"DIP TRIGGERED ({highlight_threshold:.0%})" if triggered else "No trigger"
-        trigger_color = "#FF4B6B" if triggered else "#00C896"
+        trigger_color = NEGATIVE if triggered else POSITIVE
 
         st.markdown(
             f"""
-            <div style="background:#1E2130; border:2px solid {color}; border-radius:12px;
+            <div style="background:{BG_SURFACE_RAISED}; border:2px solid {color}; border-radius:12px;
                         padding:16px; margin-bottom:10px">
-                <h4 style="margin:0; color:#FAFAFA">{name}</h4>
-                <p style="margin:6px 0; font-size:1.8em; color:{color}; font-weight:800; line-height:1">{fmt_pct(current_dd)}</p>
-                <p style="margin:0; color:#9CA3AF; font-size:0.85em">{label}</p>
-                <p style="margin:4px 0; color:#6B7280; font-size:0.8em">Last: {last_price:.2f} | {days_since_high} calendar days from high</p>
+                <h4 style="margin:0; color:{TEXT_PRIMARY}">{name}</h4>
+                <p style="margin:6px 0; font-size:1.8em; color:{color}; font-weight:800; line-height:1;
+                          font-variant-numeric:tabular-nums">{fmt_pct(current_dd)}</p>
+                <p style="margin:0; color:{TEXT_MUTED}; font-size:0.85em">{label}</p>
+                <p style="margin:4px 0; color:{TEXT_SECONDARY}; font-size:0.8em">Last: {last_price:.2f} | {days_since_high} calendar days from high</p>
                 <span style="background:{trigger_color}22; border:1px solid {trigger_color};
                              border-radius:4px; padding:2px 8px; color:{trigger_color};
                              font-size:0.8em; font-weight:600">{trigger_str}</span>
@@ -122,10 +130,7 @@ for i, (name, df) in enumerate(price_frames.items()):
 # ---------------------------------------------------------------------------
 # Total Return Chart with dip highlights
 # ---------------------------------------------------------------------------
-st.markdown(
-    '<h3 style="color:#FAFAFA; font-weight:700; margin:20px 0 8px 0">Indexed Total Return (base = 100)</h3>',
-    unsafe_allow_html=True,
-)
+st.subheader("Indexed Total Return (base = 100)")
 
 series_dict = {}
 for name, df in price_frames.items():
@@ -172,27 +177,27 @@ if series_dict:
         named_eps_catalog = load_named_episodes()
         with st.expander("Historical Named Episodes Catalog"):
             category_color_map = {
-                "bubble": "#9B59B6",
-                "financial": "#FF4B6B",
-                "macro": "#F47920",
-                "geopolitical": "#4C9BE8",
+                "bubble": "#A855F7",   # purple — no old arcade alias
+                "financial": NEGATIVE,
+                "macro": WARNING,
+                "geopolitical": ACCENT_CYAN,
             }
             for ep in named_eps_catalog:
                 cat = ep.get("category", "macro")
-                color = category_color_map.get(cat, "#9CA3AF")
+                color = category_color_map.get(cat, TEXT_MUTED)
                 st.markdown(
                     f"""
                     <div style="border-left:3px solid {color}; padding:8px 12px; margin-bottom:8px;
-                                background:#1E2130; border-radius:0 6px 6px 0">
+                                background:{BG_SURFACE_RAISED}; border-radius:0 6px 6px 0">
                         <b style="color:{color}">{ep['label']}</b>
-                        <span style="color:#6B7280; font-size:0.85em; margin-left:8px">
+                        <span style="color:{TEXT_SECONDARY}; font-size:0.85em; margin-left:8px">
                             {ep['start']} → {ep['end']}
                         </span>
-                        <span style="color:#FF4B6B; font-weight:700; margin-left:8px">
+                        <span style="color:{NEGATIVE}; font-weight:700; margin-left:8px">
                             {ep['max_drawdown']:.0%}
                         </span>
                         <br>
-                        <span style="color:#9CA3AF; font-size:0.85em">{ep['note']}</span>
+                        <span style="color:{TEXT_MUTED}; font-size:0.85em">{ep['note']}</span>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -203,10 +208,7 @@ if series_dict:
 # ---------------------------------------------------------------------------
 # Recent Episodes table — styled with HTML rows
 # ---------------------------------------------------------------------------
-st.markdown(
-    '<h3 style="color:#FAFAFA; font-weight:700; margin:20px 0 8px 0">Recent Drawdown Episodes</h3>',
-    unsafe_allow_html=True,
-)
+st.subheader("Recent Drawdown Episodes")
 
 first_df = list(price_frames.values())[0]
 first_adj = first_df["adj_close"].dropna()
@@ -237,14 +239,14 @@ if len(first_adj) > 10:
         last_dd = last_ep["trough_dd"]
         last_dur = last_ep["duration_days"]
         is_ongoing = last_ep["end"] == last_date
-        color = "#FF4B6B" if is_ongoing else "#00C896"
+        color = NEGATIVE if is_ongoing else POSITIVE
         status = "ONGOING" if is_ongoing else "Recovered"
         st.markdown(
             f"""
-            <div style="background:#1E2130; border:1px solid {color}; border-radius:10px; padding:14px;
-                        margin-top:8px">
+            <div style="background:{BG_SURFACE_RAISED}; border:1px solid {color}; border-radius:10px;
+                        padding:14px; margin-top:8px">
                 <span style="color:{color}; font-weight:700; font-size:0.95em">{status} — Most Recent Episode</span><br>
-                <span style="color:#FAFAFA">
+                <span style="color:{TEXT_PRIMARY}">
                     Start: {last_ep["start"].date()} |
                     Max drawdown: <b>{last_dd:.1%}</b> |
                     Duration: {last_dur} days
@@ -257,10 +259,7 @@ if len(first_adj) > 10:
 # ---------------------------------------------------------------------------
 # Asset Universe table
 # ---------------------------------------------------------------------------
-st.markdown(
-    '<h3 style="color:#FAFAFA; font-weight:700; margin:20px 0 8px 0">Asset Universe</h3>',
-    unsafe_allow_html=True,
-)
+st.subheader("Asset Universe")
 asset_rows = [
     {
         "ID": a["id"],

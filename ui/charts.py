@@ -1,4 +1,4 @@
-"""Plotly chart factory functions."""
+"""Plotly chart factory functions — dark-first DIP SIGNAL theme."""
 
 from __future__ import annotations
 
@@ -9,29 +9,34 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ui.theme import (
-    BLUE,
-    GOLD,
-    GRAY,
-    GREEN,
-    ORANGE,
-    RED,
-    apply_chart_layout,
+from ui.design_tokens import (
+    ACCENT_CYAN,
+    ACCENT_MAGENTA,
+    ACCENT_ORANGE,
+    BG_SURFACE,
+    BORDER,
+    NEGATIVE,
+    NEUTRAL,
+    POSITIVE,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    WARNING,
 )
+from ui.theme import apply_chart_layout
 
 COLORS = {
-    "dca": GREEN,
-    "dip": ORANGE,
-    "tiered": GOLD,
-    "cash": BLUE,
-    "neutral": GRAY,
-    "positive": GREEN,
-    "negative": RED,
+    "dca": NEUTRAL,
+    "dip": ACCENT_CYAN,
+    "tiered": ACCENT_MAGENTA,
+    "cash": ACCENT_CYAN,
+    "neutral": NEUTRAL,
+    "positive": POSITIVE,
+    "negative": NEGATIVE,
 }
 
 
 # ---------------------------------------------------------------------------
-# Existing charts (kept + dark-themed)
+# Existing charts (dark-themed)
 # ---------------------------------------------------------------------------
 
 
@@ -44,7 +49,7 @@ def total_return_chart(
 ) -> go.Figure:
     """Multi-line indexed total return chart rebased to 100."""
     fig = go.Figure()
-    color_list = [GREEN, ORANGE, GOLD, BLUE, RED, GRAY]
+    color_list = [ACCENT_CYAN, ACCENT_ORANGE, WARNING, NEUTRAL, NEGATIVE, POSITIVE]
 
     for i, (name, series) in enumerate(series_dict.items()):
         s = series.dropna()
@@ -77,7 +82,7 @@ def total_return_chart(
                 "yref": "paper",
                 "x": 0,
                 "y": -0.28,
-                "font": {"size": 10, "color": GRAY},
+                "font": {"size": 10, "color": TEXT_MUTED},
             }
         ],
     )
@@ -119,7 +124,7 @@ def wealth_comparison_chart(
             x=list(dca_ledger.index) + list(dip_ledger.index[::-1]),
             y=list(dca_ledger["total_wealth"]) + list(dip_ledger["total_wealth"][::-1]),
             fill="toself",
-            fillcolor="rgba(0,200,150,0.07)",
+            fillcolor="rgba(66,232,255,0.06)",
             line={"color": "rgba(255,255,255,0)"},
             showlegend=False,
             hoverinfo="skip",
@@ -142,7 +147,7 @@ def wealth_comparison_chart(
                 "yref": "paper",
                 "x": 0,
                 "y": -0.28,
-                "font": {"size": 10, "color": GRAY},
+                "font": {"size": 10, "color": TEXT_MUTED},
             }
         ],
     )
@@ -162,8 +167,8 @@ def drawdown_chart(
             x=series.index,
             y=series.values * 100,
             fill="tozeroy",
-            fillcolor="rgba(255,75,107,0.25)",
-            line={"color": RED, "width": 1},
+            fillcolor="rgba(255,95,115,0.20)",
+            line={"color": NEGATIVE, "width": 1},
             name="Drawdown",
             hovertemplate="Date: %{x|%Y-%m-%d}<br>DD: %{y:.1f}%<extra></extra>",
         )
@@ -173,9 +178,9 @@ def drawdown_chart(
         fig.add_hline(
             y=threshold * 100,
             line_dash="dash",
-            line_color=ORANGE,
+            line_color=ACCENT_ORANGE,
             annotation_text=f"Threshold ({threshold:.0%})",
-            annotation_font_color=ORANGE,
+            annotation_font_color=ACCENT_ORANGE,
         )
 
     apply_chart_layout(fig, title=title)
@@ -223,7 +228,7 @@ def add_dip_highlights(
         fig.add_vrect(
             x0=ep_start,
             x1=ep_end,
-            fillcolor="rgba(255,75,107,0.22)" if is_last else "rgba(255,75,107,0.10)",
+            fillcolor="rgba(255,95,115,0.22)" if is_last else "rgba(255,95,115,0.10)",
             layer="below",
             line_width=0,
             row=row,
@@ -240,9 +245,9 @@ def add_dip_highlights(
             yref="paper",
             text=f"Last dip: {ep_dd:.1%}",
             showarrow=False,
-            font=dict(color=RED, size=11),
-            bgcolor="rgba(255,75,107,0.2)",
-            bordercolor=RED,
+            font=dict(color=NEGATIVE, size=11),
+            bgcolor="rgba(255,95,115,0.2)",
+            bordercolor=NEGATIVE,
             borderwidth=1,
             borderpad=4,
         )
@@ -265,23 +270,25 @@ def plot_strategy_wealth(
     )
 
     # Top panel: wealth curves
+    # DCA: NEUTRAL solid
     fig.add_trace(
         go.Scatter(
             x=dca_ledger.index,
             y=dca_ledger["total_wealth"],
             name="Invest monthly (DCA)",
-            line=dict(color=GREEN, width=2),
+            line=dict(color=NEUTRAL, width=2, dash="solid"),
             hovertemplate="<b>DCA</b><br>%{x|%Y-%m-%d}<br>%{y:,.0f}<extra></extra>",
         ),
         row=1,
         col=1,
     )
+    # Dip: ACCENT_CYAN dash
     fig.add_trace(
         go.Scatter(
             x=dip_ledger.index,
             y=dip_ledger["total_wealth"],
             name="Wait for a dip",
-            line=dict(color=ORANGE, width=2),
+            line=dict(color=ACCENT_CYAN, width=2, dash="dash"),
             hovertemplate="<b>Dip</b><br>%{x|%Y-%m-%d}<br>%{y:,.0f}<extra></extra>",
         ),
         row=1,
@@ -289,12 +296,13 @@ def plot_strategy_wealth(
     )
 
     if tiered_ledger is not None:
+        # Tiered: ACCENT_MAGENTA dashdot
         fig.add_trace(
             go.Scatter(
                 x=tiered_ledger.index,
                 y=tiered_ledger["total_wealth"],
                 name="Tiered deployment",
-                line=dict(color=GOLD, width=2, dash="dot"),
+                line=dict(color=ACCENT_MAGENTA, width=2, dash="dashdot"),
                 hovertemplate="<b>Tiered</b><br>%{x|%Y-%m-%d}<br>%{y:,.0f}<extra></extra>",
             ),
             row=1,
@@ -307,8 +315,8 @@ def plot_strategy_wealth(
             x=dca_ledger.index,
             y=dca_ledger["dd"] * 100,
             fill="tozeroy",
-            fillcolor="rgba(255,75,107,0.2)",
-            line=dict(color=RED, width=1),
+            fillcolor="rgba(255,95,115,0.18)",
+            line=dict(color=NEGATIVE, width=1),
             name="DCA Drawdown",
             showlegend=False,
             hovertemplate="DD: %{y:.1f}%<extra></extra>",
@@ -333,29 +341,28 @@ def plot_strategy_wealth(
 
 def plot_drawdown_gauge(current_dd: float, threshold: float) -> go.Figure:
     """Plotly gauge showing current drawdown vs threshold."""
-    # Gauge goes from 0 to -50%
     gauge_val = abs(current_dd) * 100  # positive number for gauge
     threshold_abs = abs(threshold) * 100
 
-    color = GREEN if current_dd > threshold else RED
+    color = POSITIVE if current_dd > threshold else NEGATIVE
 
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number+delta",
             value=gauge_val,
-            delta={"reference": threshold_abs, "increasing": {"color": RED}, "decreasing": {"color": GREEN}},
+            delta={"reference": threshold_abs, "increasing": {"color": NEGATIVE}, "decreasing": {"color": POSITIVE}},
             number={"suffix": "% from peak", "font": {"color": color, "size": 18}},
             gauge={
-                "axis": {"range": [0, 50], "ticksuffix": "%", "tickfont": {"color": "#FAFAFA"}},
+                "axis": {"range": [0, 50], "ticksuffix": "%", "tickfont": {"color": TEXT_PRIMARY}},
                 "bar": {"color": color},
-                "bgcolor": "#1E2130",
-                "bordercolor": "#3D4066",
+                "bgcolor": BG_SURFACE,
+                "bordercolor": BORDER,
                 "steps": [
-                    {"range": [0, threshold_abs], "color": "rgba(0,200,150,0.15)"},
-                    {"range": [threshold_abs, 50], "color": "rgba(255,75,107,0.15)"},
+                    {"range": [0, threshold_abs], "color": "rgba(55,211,154,0.12)"},
+                    {"range": [threshold_abs, 50], "color": "rgba(255,95,115,0.12)"},
                 ],
                 "threshold": {
-                    "line": {"color": ORANGE, "width": 3},
+                    "line": {"color": ACCENT_ORANGE, "width": 3},
                     "thickness": 0.8,
                     "value": threshold_abs,
                 },
@@ -382,7 +389,7 @@ def plot_forward_returns_box(episodes_df: pd.DataFrame) -> go.Figure:
         return fig
 
     fig = go.Figure()
-    colors_cycle = [ORANGE, GOLD, GREEN, BLUE, RED]
+    colors_cycle = [ACCENT_ORANGE, WARNING, POSITIVE, ACCENT_CYAN, NEGATIVE]
 
     for i, col in enumerate(horizon_cols):
         label = col.replace("fwd_", "").replace("_", " ")
@@ -406,7 +413,7 @@ def plot_forward_returns_box(episodes_df: pd.DataFrame) -> go.Figure:
         yaxis_ticksuffix="%",
         showlegend=False,
     )
-    fig.add_hline(y=0, line_dash="dot", line_color=GRAY, annotation_text="Breakeven")
+    fig.add_hline(y=0, line_dash="dot", line_color=NEUTRAL, annotation_text="Breakeven")
     return fig
 
 
@@ -424,12 +431,12 @@ def plot_rolling_win_rate(rolling_df: pd.DataFrame) -> go.Figure:
             z=pivot.values * 100,
             x=[str(c) for c in pivot.columns],
             y=[str(r) for r in pivot.index],
-            colorscale=[[0, RED], [0.5, "#888888"], [1, GREEN]],
+            colorscale=[[0, NEGATIVE], [0.5, NEUTRAL], [1, POSITIVE]],
             zmid=50,
             colorbar=dict(
-                title=dict(text="Win Rate (%)", font=dict(color="#FAFAFA")),
+                title=dict(text="Win Rate (%)", font=dict(color=TEXT_PRIMARY)),
                 ticksuffix="%",
-                tickfont=dict(color="#FAFAFA"),
+                tickfont=dict(color=TEXT_PRIMARY),
             ),
             hovertemplate="Threshold: %{y}<br>Horizon: %{x}<br>Win rate: %{z:.1f}%<extra></extra>",
         )
@@ -462,8 +469,8 @@ def plot_fx_decomposition(
             y=(tr_native - 1) * 100,
             name="Native Return",
             fill="tozeroy",
-            fillcolor="rgba(76,155,232,0.3)",
-            line=dict(color=BLUE, width=1.5),
+            fillcolor="rgba(66,232,255,0.15)",
+            line=dict(color=ACCENT_CYAN, width=1.5),
             hovertemplate="Native: %{y:.2f}%<extra></extra>",
         )
     )
@@ -473,8 +480,8 @@ def plot_fx_decomposition(
             y=fx_contribution * 100,
             name="FX Contribution",
             fill="tozeroy",
-            fillcolor="rgba(244,121,32,0.25)",
-            line=dict(color=ORANGE, width=1.5),
+            fillcolor="rgba(255,145,77,0.18)",
+            line=dict(color=ACCENT_ORANGE, width=1.5),
             hovertemplate="FX: %{y:.2f}%<extra></extra>",
         )
     )
@@ -483,7 +490,7 @@ def plot_fx_decomposition(
             x=tr_base.index,
             y=(tr_base - 1) * 100,
             name=f"Total ({base_currency})",
-            line=dict(color=GREEN, width=2, dash="dot"),
+            line=dict(color=POSITIVE, width=2, dash="dot"),
             hovertemplate=f"Total ({base_currency}): %{{y:.2f}}%<extra></extra>",
         )
     )
@@ -498,7 +505,7 @@ def plot_fx_decomposition(
         yaxis_title="Cumulative Return (%)",
         yaxis_ticksuffix="%",
     )
-    fig.add_hline(y=0, line_dash="dot", line_color=GRAY)
+    fig.add_hline(y=0, line_dash="dot", line_color=NEUTRAL)
     return fig
 
 
@@ -517,9 +524,9 @@ def add_named_episode_labels(
     """
     category_colors = {
         "bubble": "rgba(155,89,182,0.12)",
-        "financial": "rgba(255,75,107,0.14)",
-        "macro": "rgba(244,121,32,0.10)",
-        "geopolitical": "rgba(76,155,232,0.10)",
+        "financial": "rgba(255,95,115,0.14)",
+        "macro": "rgba(255,145,77,0.10)",
+        "geopolitical": "rgba(66,232,255,0.10)",
     }
 
     for ep in episodes:
@@ -553,7 +560,7 @@ def add_named_episode_labels(
             yref="paper",
             text=ep["label"],
             showarrow=False,
-            font=dict(size=9, color="#9CA3AF"),
+            font=dict(size=9, color=TEXT_MUTED),
             textangle=-45,
             xanchor="left",
             yanchor="bottom",
@@ -569,13 +576,13 @@ def plot_savings_rates(rates_df: pd.DataFrame) -> go.Figure:
 
     fig = go.Figure()
     color_map = {
-        "DE": ORANGE,
-        "NL": GOLD,
-        "CH": BLUE,
-        "ECB": GREEN,
-        "SNB": BLUE,
+        "DE": ACCENT_ORANGE,
+        "NL": WARNING,
+        "CH": ACCENT_CYAN,
+        "ECB": POSITIVE,
+        "SNB": ACCENT_CYAN,
     }
-    color_list = [ORANGE, GREEN, BLUE, GOLD, RED]
+    color_list = [ACCENT_ORANGE, POSITIVE, ACCENT_CYAN, WARNING, NEGATIVE]
 
     for i, col in enumerate(rates_df.columns):
         key = str(col).upper()
@@ -612,7 +619,7 @@ def plot_savings_rates(rates_df: pd.DataFrame) -> go.Figure:
         yaxis_title="Rate (% p.a.)",
         yaxis_ticksuffix="%",
     )
-    fig.add_hline(y=0, line_dash="dot", line_color=GRAY)
+    fig.add_hline(y=0, line_dash="dot", line_color=NEUTRAL)
     return fig
 
 
@@ -629,6 +636,9 @@ def plot_sweep_heatmap(
     subtitle: str = "% of rolling windows where dip strategy beats monthly DCA",
     value_fmt: str = ".0%",
     zmid: float = 50,
+    colorscale: str | list | None = None,
+    zmin: float | None = None,
+    zmax: float | None = None,
 ) -> go.Figure:
     """Heatmap: threshold (rows) x deploy fraction (cols).
 
@@ -641,6 +651,9 @@ def plot_sweep_heatmap(
         subtitle: Chart subtitle.
         value_fmt: Python format spec for cell annotations.
         zmid: Midpoint of the colorscale (default 50 for win-rate 0-100 scale).
+        colorscale: Plotly colorscale override.
+        zmin: Minimum value for colorscale.
+        zmax: Maximum value for colorscale.
     """
     z_vals = pivot_df.values.astype(float)
 
@@ -650,24 +663,32 @@ def plot_sweep_heatmap(
 
     # Scale z to 0-100 for percentage metrics
     z_display = z_vals * 100 if value_fmt.endswith("%") else z_vals
+    zmid_display = zmid * 100 if value_fmt.endswith("%") else zmid
 
-    fig = go.Figure(
-        go.Heatmap(
-            z=z_display,
-            x=list(pivot_df.columns),
-            y=list(pivot_df.index),
-            colorscale=[[0, RED], [0.4, "#888888"], [0.6, "#888888"], [1, GREEN]],
-            zmid=zmid,
-            text=text_vals,
-            texttemplate="%{text}",
-            textfont=dict(size=12, color="white"),
-            colorbar=dict(
-                title=dict(text=title, font=dict(color="#FAFAFA")),
-                tickfont=dict(color="#FAFAFA"),
-            ),
-            hovertemplate="Threshold: %{y}<br>Deploy: %{x}<br>Value: %{z:.1f}<extra></extra>",
-        )
+    default_colorscale = [[0, NEGATIVE], [0.4, NEUTRAL], [0.6, NEUTRAL], [1, POSITIVE]]
+    cs = colorscale if colorscale is not None else default_colorscale
+
+    heatmap_kwargs: dict = dict(
+        z=z_display,
+        x=list(pivot_df.columns),
+        y=list(pivot_df.index),
+        colorscale=cs,
+        zmid=zmid_display,
+        text=text_vals,
+        texttemplate="%{text}",
+        textfont=dict(size=12, color=TEXT_PRIMARY),
+        colorbar=dict(
+            title=dict(text=title, font=dict(color=TEXT_PRIMARY)),
+            tickfont=dict(color=TEXT_PRIMARY),
+        ),
+        hovertemplate="Threshold: %{y}<br>Deploy: %{x}<br>Value: %{z:.1f}<extra></extra>",
     )
+    if zmin is not None:
+        heatmap_kwargs["zmin"] = zmin * 100 if value_fmt.endswith("%") else zmin
+    if zmax is not None:
+        heatmap_kwargs["zmax"] = zmax * 100 if value_fmt.endswith("%") else zmax
+
+    fig = go.Figure(go.Heatmap(**heatmap_kwargs))
 
     apply_chart_layout(fig, title=title, subtitle=subtitle)
     fig.update_layout(
@@ -694,12 +715,12 @@ def plot_fan_chart(
         monthly_contribution: Monthly contribution (unused in chart, kept for signature).
         currency: Currency label for y-axis.
     """
-    deploy_colors = [GREEN, ORANGE, GOLD, BLUE, RED]
+    from ui.design_tokens import CHART_COLORS
 
     fig = go.Figure()
 
     for i, sim in enumerate(sim_results):
-        color = deploy_colors[i % len(deploy_colors)]
+        color = CHART_COLORS[i % len(CHART_COLORS)]
         label = f"Deploy {sim.deploy_pct:.0%}"
         n = len(sim.p50_wealth)
         x = list(range(1, n + 1))
@@ -744,11 +765,11 @@ def plot_fan_chart(
     )
 
     if horizon_months >= 12:
-        fig.add_vline(x=12, line_dash="dot", line_color=GRAY, annotation_text="1Y")
+        fig.add_vline(x=12, line_dash="dot", line_color=NEUTRAL, annotation_text="1Y")
     if horizon_months >= 24:
-        fig.add_vline(x=24, line_dash="dot", line_color=GRAY, annotation_text="2Y")
+        fig.add_vline(x=24, line_dash="dot", line_color=NEUTRAL, annotation_text="2Y")
     if horizon_months >= 36:
-        fig.add_vline(x=36, line_dash="dot", line_color=GRAY, annotation_text="3Y")
+        fig.add_vline(x=36, line_dash="dot", line_color=NEUTRAL, annotation_text="3Y")
 
     return fig
 
@@ -762,7 +783,7 @@ def plot_threshold_wealth_bar(results: list[dict], baseline_wealth: float, curre
 
     thresholds = [f"{r['threshold']:.0%}" for r in results]
     wealths = [r["ending_wealth"] for r in results]
-    colors = [GREEN if w >= baseline_wealth else RED for w in wealths]
+    colors = [POSITIVE if w >= baseline_wealth else NEGATIVE for w in wealths]
 
     fig = go.Figure(
         go.Bar(
@@ -776,9 +797,9 @@ def plot_threshold_wealth_bar(results: list[dict], baseline_wealth: float, curre
     fig.add_hline(
         y=baseline_wealth,
         line_dash="dash",
-        line_color=GREEN,
+        line_color=POSITIVE,
         annotation_text=f"DCA baseline ({baseline_wealth:,.0f})",
-        annotation_font_color=GREEN,
+        annotation_font_color=POSITIVE,
     )
 
     apply_chart_layout(

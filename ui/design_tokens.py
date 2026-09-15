@@ -1,73 +1,87 @@
-"""Centralized design tokens — light-first color, border, and spacing system.
-
-All UI files should import from here rather than hardcoding hex values.
-Charts import CHART_COLORS and STRATEGY_COLORS; CSS uses the string constants.
-"""
-
+"""Centralized design tokens — dark-first DIP SIGNAL brand system."""
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# Brand colors
+# Surfaces (dark-first)
 # ---------------------------------------------------------------------------
 
-PRIMARY   = "#1A56DB"  # blue — CTAs, active tabs, primary actions
-SECONDARY = "#374151"  # dark gray — secondary text, subdued elements
+BG_CANVAS = "#07070A"
+BG_SURFACE = "#111218"
+BG_SURFACE_RAISED = "#1A1C24"
+BG_SURFACE_ACTIVE = "#232631"
 
-# ---------------------------------------------------------------------------
-# Semantic colors
-# ---------------------------------------------------------------------------
-
-POSITIVE = "#057A55"  # green — gains, beats DCA, good outcomes
-NEGATIVE = "#E02424"  # red — losses, drawdowns, below DCA
-NEUTRAL  = "#6B7280"  # gray — idle, DCA baseline, no signal
-WARNING  = "#C27803"  # amber — approaching dip threshold
-
-# ---------------------------------------------------------------------------
-# Surface colors (light-first)
-# ---------------------------------------------------------------------------
-
-BG_PAGE   = "#F9FAFB"  # page background
-BG_CARD   = "#FFFFFF"  # card / metric container background
-BG_SUBTLE = "#F3F4F6"  # sidebar, table alternates, subtle separators
-
-# ---------------------------------------------------------------------------
-# Borders
-# ---------------------------------------------------------------------------
-
-BORDER       = "#E5E7EB"  # default card/container border
-BORDER_STRONG = "#D1D5DB"  # emphasized dividers
+BORDER = "#343746"
+BORDER_STRONG = "#505465"
 
 # ---------------------------------------------------------------------------
 # Text
 # ---------------------------------------------------------------------------
 
-TEXT_PRIMARY   = "#111827"  # headings, primary labels
-TEXT_SECONDARY = "#6B7280"  # captions, metadata
-TEXT_DISABLED  = "#9CA3AF"  # placeholder, disabled state
+TEXT_PRIMARY = "#F7F7F2"
+TEXT_SECONDARY = "#C3C6D1"
+TEXT_MUTED = "#959AAA"
+TEXT_DISABLED = "#727786"
 
 # ---------------------------------------------------------------------------
-# Chart palette (ordered — cycle through for multi-series charts)
+# Accents
 # ---------------------------------------------------------------------------
 
-CHART_COLORS = ["#1A56DB", "#057A55", "#C27803", "#6B7280", "#E02424"]
+ACCENT_CYAN = "#42E8FF"
+ACCENT_MAGENTA = "#FF4DC4"
+ACCENT_LIME = "#D8FF4F"
+ACCENT_ORANGE = "#FF914D"
 
 # ---------------------------------------------------------------------------
-# Strategy colors (plain names — no mascot aliases)
+# Semantic
+# ---------------------------------------------------------------------------
+
+POSITIVE = "#37D39A"
+NEGATIVE = "#FF5F73"
+WARNING = "#FFB84A"
+NEUTRAL = "#A7ACB9"
+
+# ---------------------------------------------------------------------------
+# Brand gradient (decoration only — never place body text on this)
+# ---------------------------------------------------------------------------
+
+BRAND_GRADIENT = "linear-gradient(115deg,#42E8FF 0%,#6576FF 30%,#FF4DC4 65%,#D8FF4F 100%)"
+
+# ---------------------------------------------------------------------------
+# Strategy colors
 # ---------------------------------------------------------------------------
 
 STRATEGY_COLORS: dict[str, str] = {
-    "DCA":              NEUTRAL,   # gray — monthly DCA baseline
-    "Invest monthly":   NEUTRAL,
-    "Invest now":       PRIMARY,   # blue — lump-sum / deploy cash now
-    "Wait for dip":     WARNING,   # amber — wait-for-threshold strategy
-    "Tiered":           POSITIVE,  # green — tiered deployment
-    "Tiered deployment": POSITIVE,
+    "DCA":               NEUTRAL,
+    "Invest monthly":    NEUTRAL,
+    "Wait for dip":      ACCENT_CYAN,
+    "Tiered":            ACCENT_MAGENTA,
+    "Tiered deployment": ACCENT_MAGENTA,
+    "Invest now":        ACCENT_ORANGE,
 }
+STRATEGY_DASH: dict[str, str] = {
+    "DCA":               "solid",
+    "Invest monthly":    "solid",
+    "Wait for dip":      "dash",
+    "Tiered":            "dashdot",
+    "Tiered deployment": "dashdot",
+    "Invest now":        "dot",
+}
+CHART_COLORS = [ACCENT_CYAN, NEUTRAL, ACCENT_MAGENTA, ACCENT_ORANGE, ACCENT_LIME, POSITIVE, NEGATIVE]
 
 # ---------------------------------------------------------------------------
-# Border-radius scale (referenced in inline style strings)
+# Backward-compat aliases (pages still import these names)
 # ---------------------------------------------------------------------------
 
-RADIUS_SM = "6px"
-RADIUS_MD = "10px"
-RADIUS_LG = "16px"
+PRIMARY   = ACCENT_CYAN
+SECONDARY = TEXT_SECONDARY
+BG_PAGE   = BG_CANVAS
+BG_CARD   = BG_SURFACE
+BG_SUBTLE = BG_SURFACE_RAISED
+
+# ---------------------------------------------------------------------------
+# Spacing & radius
+# ---------------------------------------------------------------------------
+
+RADIUS_SM = "4px"
+RADIUS_MD = "8px"
+RADIUS_LG = "12px"

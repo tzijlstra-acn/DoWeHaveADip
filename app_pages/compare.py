@@ -21,6 +21,7 @@ from dipdca.quant.backtest import run_dca, run_tiered_dip, run_wait_for_dip  # n
 from dipdca.quant.episodes import load_named_episodes  # noqa: E402
 from ui.charts import add_named_episode_labels, drawdown_chart, plot_strategy_wealth  # noqa: E402
 from ui.components import (  # noqa: E402
+    conclusion_banner,
     freshness_caption,
     live_data_error,
     page_header,
@@ -34,9 +35,8 @@ from ui.theme import GLOBAL_CSS  # noqa: E402
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header(
-    "Compare choices",
-    "Head-to-head comparison: invest monthly vs wait for a dip vs invest now. "
-    "Uses real historical data — not a prediction.",
+    "SETTLE THE TIMING DEBATE",
+    "Monthly DCA versus cash-on-dip — identical external cash flows, same market.",
 )
 
 # ---------------------------------------------------------------------------
@@ -72,6 +72,13 @@ with st.expander("Advanced assumptions"):
         end_date = st.date_input("History end", value=datetime.date(2024, 12, 31))
         fixed_fee = st.number_input("Fixed fee (EUR)", min_value=0.0, value=0.0, step=0.5)
         pct_fee = st.slider("% fee (bps)", min_value=0, max_value=100, value=10) / 10_000.0
+        cash_rate_pct = st.slider(
+            "Savings rate on waiting cash (% p.a.)",
+            min_value=0.0, max_value=8.0, value=2.5, step=0.25,
+            help="Annual interest rate earned on cash held by the wait-for-dip strategy. "
+                 "Use your after-tax savings account rate.",
+        )
+        cash_rate_override = cash_rate_pct / 100.0
 
 # ---------------------------------------------------------------------------
 # Load market data
@@ -102,6 +109,7 @@ try:
         monthly_contribution=float(monthly_contribution),
         payday=25,
         initial_investment=float(initial_investment),
+        initial_cash_reserve=float(cash_available),
         start_date=start_date,
         end_date=end_date,
         dip_threshold=dip_threshold,
@@ -111,6 +119,7 @@ try:
         deployment_pct=deployment_pct,
         cash_buffer_months=cash_buffer,
         deploy_spread_months=1,
+        cash_rate_override=cash_rate_override if cash_rate_override > 0 else None,
     )
 except Exception as exc:
     st.error(f"Invalid parameters: {exc}")
@@ -151,15 +160,7 @@ with tab_main:
         )
         conclusion_color = WARNING
 
-    st.markdown(
-        f"""
-        <div style="background:#F9FAFB; border-left:4px solid {conclusion_color};
-                    border-radius:0 8px 8px 0; padding:14px 20px; margin:16px 0 24px 0">
-            <p style="margin:0; color:#111827; font-size:1em">{conclusion}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    conclusion_banner(conclusion, color=conclusion_color)
 
     # Comparison cards (no mascots — updated in ui/components.py)
     strategy_comparison_cards(dca_result, dip_result)
@@ -211,10 +212,15 @@ with tab_main:
             peak_uninvested = float(dip_ledger["cash"].max())
             st.metric("Peak uninvested cash", fmt_currency(peak_uninvested))
         with s3:
-            cash_days = float((dip_ledger["cash"] > 0).sum())
-            total_days = float(len(dip_ledger))
-            avg_cash_drag = (cash_days / total_days) * (total_days / 21)
-            st.metric("Avg cash drag", f"{avg_cash_drag:.1f} months")
+            # Average cash weight: fraction of total wealth held in cash
+            wealth = dip_ledger["total_wealth"].replace(0, float("nan"))
+            avg_cash_weight = float((dip_ledger["cash"] / wealth).mean())
+            st.metric(
+                "Avg cash weight",
+                f"{avg_cash_weight:.1%}",
+                help="Average fraction of portfolio held in cash (waiting for dip). "
+                     "Higher = more time out of the market.",
+            )
 
 # ---------------------------------------------------------------------------
 # Tab 2: Tiered deployment

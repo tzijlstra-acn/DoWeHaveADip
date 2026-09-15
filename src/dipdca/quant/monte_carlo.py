@@ -307,15 +307,16 @@ def conditional_path_bootstrap(
             sim_wealth_paths.append(wealth_path)
             sim_terminal_wealths.append(wealth_path[-1] if wealth_path else 0.0)
 
-            # --- DCA baseline: each monthly contribution earns returns from its investment
-            # month forward, not from entry. Paired with the same sampled path. ---
-            dca_cash = cash_accumulated
-            # Contribution at t=0 (invested at entry): earns full path[-1]
-            dca_terminal_invested = monthly_contribution * float(path[-1])
-            # Contributions at t=1..n_months-1: earn path[-1]/path[m-1]
+            # --- DCA baseline: deploy cash_accumulated immediately at entry (t=0),
+            # then invest each monthly contribution as it arrives.
+            # Same external capital flows as the dip strategy — only timing differs. ---
+            # cash_accumulated invested at entry earns the full path return
+            dca_terminal = cash_accumulated * float(path[-1])
+            # Monthly contribution at t=0 also invested at entry
+            dca_terminal += monthly_contribution * float(path[-1])
+            # Contributions at t=1..n_months-1: each earns path[-1]/path[m-1]
             for m in range(1, n_months):
-                dca_terminal_invested += monthly_contribution * float(path[-1]) / float(path[m - 1])
-            dca_terminal = dca_terminal_invested + dca_cash * (monthly_cash_factor ** n_months)
+                dca_terminal += monthly_contribution * float(path[-1]) / float(path[m - 1])
             sim_dca_terminals.append(dca_terminal)
 
         # Build wealth matrix for percentile computation
