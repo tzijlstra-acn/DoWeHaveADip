@@ -213,3 +213,67 @@ def results_to_dataframe(results: list[BootstrapResult]) -> pd.DataFrame:
             "P90 vs DCA": r.p90_vs_dca,
         })
     return pd.DataFrame(rows)
+
+
+@dataclass(frozen=True)
+class EraResult:
+    """Win rate for one policy in one chronological sub-period of the data."""
+
+    era_label: str
+    n_episodes: int
+    win_rate: float | None
+    median_vs_dca: float | None
+
+
+def temporal_stability(
+    studies: list[EpisodeStudy],
+    threshold: float,
+    horizon_label: str,
+    policy: str = "ATH all-in",
+    n_eras: int = 2,
+) -> list[EraResult]:
+    """Split episodes chronologically and report win rate by era.
+
+    With ~8 episodes in total, even halves have ~4 each — treat results as
+    directional indicators rather than statistically precise estimates.
+
+    Args:
+        studies: Output of ``run_event_study``.
+        threshold: The drawdown threshold to analyse.
+        horizon_label: Horizon label.
+        policy: Policy to compare against DCA.
+        n_eras: Number of chronological equal-size sub-periods (default 2).
+
+    Returns:
+        List of ``EraResult``, one per era ordered chronologically.
+        Eras with 0 eligible episodes have ``win_rate=None``.
+    """
+    eligible = _filter_eligible(studies, threshold, horizon_label, policy)
+    if not eligible:
+        return []
+
+    # Sort by episode ATH date
+    eligible_sorted = sorted(eligible, key=lambda s: s.episode.ath_date)
+    n = len(eligible_sorted)
+
+    results = []
+    for i in range(n_eras):
+        lo = i * n // n_eras
+        hi = (i + 1) * n // n_eras
+        chunk = eligible_sorted[lo:hi]
+        era_start = chunk[0].episode.ath_date.year
+        era_end = chunk[-1].episode.ath_date.year
+        label = f"{era_start}" if era_start == era_end else f"{era_start}–{era_end}"
+
+        if not chunk:
+            results.append(EraResult(label, 0, None, None))
+            continue
+
+        rels = _relative_returns(chunk, policy, horizon_label)
+        results.append(EraResult(
+            era_label=label,
+            n_episodes=len(chunk),
+            win_rate=float(np.mean(rels > 0)),
+            median_vs_dca=float(np.median(rels)),
+        ))
+    return results

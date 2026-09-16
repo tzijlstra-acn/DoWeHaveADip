@@ -21,6 +21,7 @@ from dipdca.quant.episode_bootstrap import (
     bootstrap_all_thresholds,
     bootstrap_win_rate,
     results_to_dataframe,
+    temporal_stability,
 )
 
 # ---------------------------------------------------------------------------
@@ -268,3 +269,54 @@ class TestResultsToDataframe:
     def test_empty_results_gives_empty_dataframe(self):
         df = results_to_dataframe([])
         assert len(df) == 0
+
+
+# ---------------------------------------------------------------------------
+# Temporal stability
+# ---------------------------------------------------------------------------
+
+class TestTemporalStability:
+    def test_two_eras_split_episodes_in_half(self):
+        studies = all_dip_wins(8)
+        eras = temporal_stability(studies, threshold=-0.15, horizon_label="12m")
+        assert len(eras) == 2
+        assert eras[0].n_episodes == 4
+        assert eras[1].n_episodes == 4
+
+    def test_era_labels_are_chronological(self):
+        # Build studies spanning two distinct years
+        early = [make_study(f"2020-0{i}-01", 12_000, 10_000) for i in range(1, 5)]
+        late = [make_study(f"2025-0{i}-01", 12_000, 10_000) for i in range(1, 5)]
+        eras = temporal_stability(early + late, threshold=-0.15, horizon_label="12m")
+        assert eras[0].era_label < eras[1].era_label  # chronologically ordered
+
+    def test_all_wins_gives_win_rate_1_in_both_eras(self):
+        studies = all_dip_wins(8)
+        eras = temporal_stability(studies, threshold=-0.15, horizon_label="12m")
+        for era in eras:
+            assert era.win_rate == pytest.approx(1.0)
+
+    def test_empty_returns_empty(self):
+        eras = temporal_stability([], threshold=-0.15, horizon_label="12m")
+        assert eras == []
+
+    def test_wrong_threshold_returns_empty(self):
+        studies = all_dip_wins(6)  # threshold=-0.15
+        eras = temporal_stability(studies, threshold=-0.25, horizon_label="12m")
+        assert eras == []
+
+    def test_mixed_eras_show_different_win_rates(self):
+        # First 4 episodes: all dip wins; last 4: all DCA wins
+        early = [make_study(f"2010-0{i}-01", 12_000, 10_000) for i in range(1, 5)]
+        late = [make_study(f"2020-0{i}-01", 9_000, 10_000) for i in range(1, 5)]
+        eras = temporal_stability(early + late, threshold=-0.15, horizon_label="12m")
+        assert len(eras) == 2
+        assert eras[0].win_rate == pytest.approx(1.0)
+        assert eras[1].win_rate == pytest.approx(0.0)
+
+    def test_n_eras_parameter_controls_split_count(self):
+        studies = all_dip_wins(9)
+        eras = temporal_stability(studies, threshold=-0.15, horizon_label="12m", n_eras=3)
+        assert len(eras) == 3
+        total = sum(e.n_episodes for e in eras)
+        assert total == 9

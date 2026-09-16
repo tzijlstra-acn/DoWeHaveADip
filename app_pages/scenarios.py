@@ -42,7 +42,7 @@ from dipdca.quant.ath_episodes import (  # noqa: E402
     summarise_threshold,
 )
 from dipdca.quant.drawdown import drawdown  # noqa: E402
-from dipdca.quant.episode_bootstrap import bootstrap_win_rate  # noqa: E402
+from dipdca.quant.episode_bootstrap import bootstrap_win_rate, temporal_stability  # noqa: E402
 from dipdca.quant.fx import instrument_to_base_currency  # noqa: E402
 from ui.components import freshness_caption, live_data_error, page_header  # noqa: E402
 from ui.copy import DISCLAIMER_SHORT  # noqa: E402
@@ -409,7 +409,7 @@ with tab_summary:
                 "the percentiles are indicative only."
             )
 
-            with st.expander("Per-episode detail"):
+            with st.expander("Per-episode detail and temporal stability"):
                 detail = []
                 for s in studies:
                     if s.threshold != thresholds[0]:
@@ -418,13 +418,40 @@ with tab_summary:
                     detail.append({
                         "ATH date": s.episode.ath_date.date(),
                         "Signal date": s.signal_date.date(),
-                        "Trough": s.episode.trough_drawdown,
+                        "Trough drawdown": s.episode.trough_drawdown,
                         "Recovered": not s.episode.is_censored,
                         f"{policy} vs DCA": rel,
                     })
                 if detail:
                     st.dataframe(pd.DataFrame(detail), width="stretch", hide_index=True)
                     st.caption(f"Shown for the {thresholds[0]:.0%} threshold.")
+
+                # Temporal stability: is the pattern consistent across eras?
+                era_data = temporal_stability(
+                    studies,
+                    threshold=thresholds[0],
+                    horizon_label=horizon_label,
+                    policy=policy,
+                )
+                if len(era_data) >= 2:
+                    st.markdown("**Temporal stability** — win rate by chronological era")
+                    era_rows = [
+                        {
+                            "Era": e.era_label,
+                            "Episodes": e.n_episodes,
+                            "Win rate": f"{e.win_rate:.0%}" if e.win_rate is not None else "—",
+                            "Median vs DCA": (
+                                f"{e.median_vs_dca:+.2%}" if e.median_vs_dca is not None else "—"
+                            ),
+                        }
+                        for e in era_data
+                    ]
+                    st.dataframe(pd.DataFrame(era_rows), width="stretch", hide_index=True)
+                    st.caption(
+                        "With few episodes per era, these are directional indicators only. "
+                        "A consistent win rate across eras is more trustworthy than an "
+                        "aggregate figure driven by one dominant crash period."
+                    )
 
 # ---------------------------------------------------------------------------
 # Tab 2: episode log
