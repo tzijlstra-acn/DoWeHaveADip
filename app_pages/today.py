@@ -15,9 +15,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from dipdca.config import load_assets_config  # noqa: E402
 from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
 from dipdca.data.service import get_market_data_service  # noqa: E402
+from dipdca.quant.ath_episodes import find_ath_episodes  # noqa: E402
 from dipdca.quant.drawdown import drawdown, drawdown_episodes  # noqa: E402
-from dipdca.quant.monte_carlo import conditional_path_bootstrap  # noqa: E402
-from ui.charts import drawdown_chart, plot_fan_chart  # noqa: E402
+from ui.charts import drawdown_chart  # noqa: E402
 from ui.components import (  # noqa: E402
     freshness_caption,
     live_data_error,
@@ -220,45 +220,78 @@ st.plotly_chart(fig_dd, width="stretch")
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Historical context — fan chart (conditional path bootstrap)
+# Historical context — ATH episode summary near the current drawdown level
 # ---------------------------------------------------------------------------
-st.subheader("What happened next in similar periods?")
-st.caption(
-    f"Historical periods where {selected_name} was within 5% of today's level "
-    f"({current_dd:.1%}). Shows the distribution of 12-month outcomes. "
-    "This is historical data — not a prediction."
+st.subheader("What happened next in similar drawdown episodes?")
+
+# Use a drawdown threshold just above (shallower than) the current drawdown to
+# find episodes that crossed a level similar to where the market is today.
+_nearby_threshold = round(max(current_dd - 0.025, -0.99), 2)
+_all_thresholds = (-0.05, -0.10, -0.15, -0.20, -0.25, -0.30, -0.35, -0.40, -0.50)
+_signal_threshold = next(
+    (t for t in _all_thresholds if current_dd <= t + 0.025),
+    None,
 )
 
-with st.spinner("Finding similar historical periods..."):
-    try:
-        monthly_prices = price_series.resample("ME").last().dropna()
-        sims = conditional_path_bootstrap(
-            prices=monthly_prices,
-            current_drawdown=current_dd,
-            deploy_pcts=[0.0, 0.5, 1.0] if cash_available > 0 else [0.0],
-            monthly_contribution=float(monthly_contribution),
-            cash_accumulated=float(cash_available),
-            horizon_months=12,
-            n_simulations=200,
-            seed=42,
-        )
-    except Exception:
-        sims = []
-
-if not sims:
+if _signal_threshold is None or abs(current_dd) < 0.01:
     st.info(
-        "Not enough similar historical periods found for a distribution chart. "
-        "Try a wider date range or a different asset."
+        "The index is at or near its all-time high. No similar drawdown episodes "
+        "to summarise. Check back when a drawdown develops."
     )
 else:
-    deploy_labels = {0.0: "Invest monthly only", 0.5: "Deploy 50% of cash now", 1.0: "Deploy all cash now"}
-    for sim in sims:
-        label_key = sim.deploy_pct
-        chart_label = deploy_labels.get(label_key, f"Deploy {sim.deploy_pct:.0%} of cash")
-        n_periods = len([d for d in dd_series.index if abs(float(dd_series.loc[d]) - current_dd) <= 0.05])
-        st.caption(f"Based on {n_periods} historical periods — {chart_label}")
-        fig_fan = plot_fan_chart([sim], currency="EUR", horizon_months=12)
-        st.plotly_chart(fig_fan, width="stretch")
+    with st.spinner("Summarising historical drawdown episodes..."):
+        try:
+            _eps = find_ath_episodes(
+                signal_series, thresholds=(_signal_threshold,)
+            )
+            _crossed = [e for e in _eps if e.crossed(_signal_threshold)]
+            _recovered = [e for e in _crossed if not e.is_censored]
+        except Exception:
+            _crossed = []
+            _recovered = []
+
+    if not _crossed:
+        st.info(
+            f"No historical ATH episode crossed {_signal_threshold:.0%} in this "
+            "data window. Try a wider date range."
+        )
+    else:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric(
+                "Episodes reaching this level",
+                f"{len(_crossed)}",
+                help=f"Independent ATH episodes where {signal_label} fell to "
+                     f"{_signal_threshold:.0%} or below.",
+            )
+        with c2:
+            st.metric(
+                "Eventually recovered the prior ATH",
+                f"{len(_recovered)} / {len(_crossed)} "
+                f"({len(_recovered)/len(_crossed):.0%})",
+            )
+        with c3:
+            if _recovered:
+                import pandas as _pd
+                rec_days = [
+                    int((_pd.Timestamp(e.recovery_date) - _pd.Timestamp(e.ath_date)).days)
+                    for e in _recovered
+                    if e.recovery_date is not None
+                ]
+                st.metric(
+                    "Median days to ATH recovery",
+                    f"{int(_pd.Series(rec_days).median()):,}",
+                    help="Calendar days from the previous all-time high to recovery.",
+                )
+            else:
+                st.metric("Median days to ATH recovery", "No recoveries in window")
+
+        st.caption(
+            f"Based on {len(_crossed)} independent ATH episodes in this data window "
+            f"where {signal_label} fell to approximately {_signal_threshold:.0%}. "
+            "Past outcomes do not predict future results. "
+            "Use Historical Scenarios for a full policy comparison."
+        )
 
 # ---------------------------------------------------------------------------
 # CTA buttons

@@ -32,6 +32,7 @@ def _make_fp(params: dict) -> str:
 
 from dipdca.config import load_assets_config  # noqa: E402
 from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.providers.ecb_fx import EcbFxProvider  # noqa: E402
 from dipdca.data.service import get_market_data_service  # noqa: E402
 from dipdca.models import DeploymentTier  # noqa: E402
 from dipdca.quant.ath_episodes import (  # noqa: E402
@@ -41,6 +42,7 @@ from dipdca.quant.ath_episodes import (  # noqa: E402
     summarise_threshold,
 )
 from dipdca.quant.drawdown import drawdown  # noqa: E402
+from dipdca.quant.fx import instrument_to_base_currency  # noqa: E402
 from ui.components import freshness_caption, live_data_error, page_header  # noqa: E402
 from ui.copy import DISCLAIMER_SHORT  # noqa: E402
 from ui.formatting import fmt_pct  # noqa: E402
@@ -166,6 +168,25 @@ with st.spinner(f"Loading {selected_name} data..."):
     except LiveDataUnavailable as exc:
         live_data_error(exc, context=selected_name)
         st.stop()
+
+# FX conversion: instrument execution prices → EUR; benchmark signal unchanged.
+_quote_currency = asset_cfg.get("quote_currency", "EUR").upper()
+if _quote_currency != "EUR":
+    try:
+        _ecb = EcbFxProvider()
+        _ecb_rates = _ecb.get_rates([_quote_currency], start_date, end_date)
+        instrument_df = instrument_to_base_currency(
+            instrument_df, _quote_currency, "EUR", _ecb_rates
+        )
+        st.caption(
+            f"Instrument prices converted from {_quote_currency} to EUR "
+            "using ECB reference rates. The benchmark drawdown stays in its native index level."
+        )
+    except Exception as _fx_exc:
+        st.warning(
+            f"Could not fetch ECB FX rates for {_quote_currency}→EUR: {_fx_exc}. "
+            f"Results are in the native instrument currency ({_quote_currency}), not EUR."
+        )
 
 if len(instrument_df) < 60 or len(benchmark_df) < 60:
     st.error("Not enough history for episode analysis. Try an earlier start date.")

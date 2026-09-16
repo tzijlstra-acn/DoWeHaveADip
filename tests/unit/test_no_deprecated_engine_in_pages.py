@@ -20,7 +20,13 @@ import pytest
 
 PAGES = Path(__file__).resolve().parents[2] / "app_pages"
 
-DEPRECATED = ("run_wait_for_dip", "run_parameter_sweep")
+DEPRECATED = (
+    "run_wait_for_dip",
+    "run_parameter_sweep",
+    "conditional_path_bootstrap",
+    "legacy_monte_carlo",
+    "monte_carlo",          # the stub raises on import; pages must not reference it
+)
 
 # Pages still awaiting migration. Each entry is a known gap, not an exemption.
 NOT_YET_MIGRATED: set[str] = set()

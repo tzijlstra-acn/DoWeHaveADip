@@ -1,4 +1,10 @@
-"""Unit tests for dipdca.quant.monte_carlo."""
+"""Unit tests for the legacy monte-carlo module (now quarantined).
+
+``dipdca.quant.monte_carlo`` is a quarantine stub that raises ``ImportError``.
+The actual implementation lives in ``dipdca.quant.legacy_monte_carlo``.
+These tests cover the legacy implementation for regression purposes only;
+new work must use ``ath_episodes`` and ``episode_bootstrap``.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +12,23 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from dipdca.models import SimulationParams
-from dipdca.quant.monte_carlo import (
+
+
+def test_monte_carlo_stub_raises_on_import():
+    """The quarantine stub must raise ImportError so pages cannot accidentally use it."""
+    import importlib
+    import sys
+
+    # Force re-import to hit the raise
+    sys.modules.pop("dipdca.quant.monte_carlo", None)
+    with pytest.raises(ImportError, match="quarantined"):
+        importlib.import_module("dipdca.quant.monte_carlo")
+
+
+from dipdca.quant.legacy_monte_carlo import (  # noqa: E402
     PathSimulation,
     SweepResult,
     conditional_path_bootstrap,

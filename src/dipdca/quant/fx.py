@@ -83,3 +83,77 @@ def rebase_to_common_currency(
     """
     fx_aligned = fx_series.reindex(price_series.index, method="ffill")
     return price_series * fx_aligned
+
+
+def instrument_to_base_currency(
+    instrument_df: pd.DataFrame,
+    from_currency: str,
+    to_currency: str,
+    ecb_rates: pd.DataFrame,
+) -> pd.DataFrame:
+    """Convert all price/value columns of an instrument DataFrame to ``to_currency``.
+
+    ECB convention: ``ecb_rates[currency]`` = units of that currency per 1 EUR.
+
+    For EUR base and USD instrument:
+        EUR_per_USD = 1 / USD_per_EUR = 1 / ecb_rates["USD"]
+        price_EUR   = price_USD * EUR_per_USD
+
+    The benchmark index is NOT passed through this function — its drawdown
+    must be computed in the index's own published native level.
+
+    Columns converted: ``adj_close``, ``close``, and any others that are
+    numeric and appear to be price columns (open, high, low).
+
+    Args:
+        instrument_df: DataFrame with DatetimeIndex and price columns.
+        from_currency: The instrument's native quote currency (e.g. ``"USD"``).
+        to_currency: Target base currency (e.g. ``"EUR"``).
+        ecb_rates: DataFrame of ECB rates (units of currency per EUR),
+                   as returned by ``EcbFxProvider.get_rates()``.
+
+    Returns:
+        New DataFrame with prices expressed in ``to_currency``.
+        Original is unchanged.
+    """
+    from_upper = from_currency.upper()
+    to_upper = to_currency.upper()
+    if from_upper == to_upper:
+        return instrument_df.copy()
+
+    if from_upper == "EUR":
+        # EUR → other: multiply by target units per EUR
+        if to_upper not in ecb_rates.columns:
+            raise ValueError(
+                f"ECB rates do not contain {to_upper}. "
+                f"Available: {list(ecb_rates.columns)}"
+            )
+        rate_series = ecb_rates[to_upper].reindex(instrument_df.index, method="ffill")
+        multiplier = rate_series
+    elif to_upper == "EUR":
+        # other → EUR: divide by source units per EUR (= multiply by reciprocal)
+        if from_upper not in ecb_rates.columns:
+            raise ValueError(
+                f"ECB rates do not contain {from_upper}. "
+                f"Available: {list(ecb_rates.columns)}"
+            )
+        rate_series = ecb_rates[from_upper].reindex(instrument_df.index, method="ffill")
+        # 1 unit of from_currency = 1/rate EUR
+        multiplier = 1.0 / rate_series
+    else:
+        # Cross rate: from → EUR → to
+        if from_upper not in ecb_rates.columns or to_upper not in ecb_rates.columns:
+            raise ValueError(
+                f"ECB rates missing {from_upper} or {to_upper}. "
+                f"Available: {list(ecb_rates.columns)}"
+            )
+        from_rate = ecb_rates[from_upper].reindex(instrument_df.index, method="ffill")
+        to_rate = ecb_rates[to_upper].reindex(instrument_df.index, method="ffill")
+        multiplier = to_rate / from_rate
+
+    price_cols = [c for c in ("adj_close", "close", "open", "high", "low")
+                  if c in instrument_df.columns]
+    result = instrument_df.copy()
+    for col in price_cols:
+        result[col] = instrument_df[col] * multiplier
+    return result

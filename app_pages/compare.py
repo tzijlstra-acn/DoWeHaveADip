@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from dipdca.config import load_assets_config  # noqa: E402
 from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
+from dipdca.data.providers.ecb_fx import EcbFxProvider  # noqa: E402
 from dipdca.data.service import get_market_data_service  # noqa: E402
 from dipdca.models import DeploymentTier, SimulationParams  # noqa: E402
 from dipdca.quant.backtest import (  # noqa: E402
@@ -27,6 +28,7 @@ from dipdca.quant.backtest import (  # noqa: E402
     run_savings_only,
 )
 from dipdca.quant.drawdown import drawdown  # noqa: E402
+from dipdca.quant.fx import instrument_to_base_currency  # noqa: E402
 from ui.charts import drawdown_chart, plot_strategy_wealth  # noqa: E402
 from ui.components import (  # noqa: E402
     conclusion_banner,
@@ -149,6 +151,35 @@ with st.spinner(f"Loading {selected_name} data..."):
     except LiveDataUnavailable as exc:
         live_data_error(exc, context=selected_name)
         st.stop()
+
+# ---------------------------------------------------------------------------
+# FX conversion — instrument prices to base currency (EUR) when needed.
+# The benchmark index is NEVER converted; its drawdown stays in the native
+# published index level.
+# ---------------------------------------------------------------------------
+_quote_currency = asset_cfg.get("quote_currency", "EUR").upper()
+_base_currency = "EUR"
+_fx_label = ""
+if _quote_currency != _base_currency:
+    _fx_label = f" (converted {_quote_currency}→{_base_currency} via ECB rates)"
+    try:
+        _ecb = EcbFxProvider()
+        _ecb_rates = _ecb.get_rates([_quote_currency], history_start, end_date)
+        instrument_full = instrument_to_base_currency(
+            instrument_full, _quote_currency, _base_currency, _ecb_rates
+        )
+        st.caption(
+            f"Instrument prices converted from {_quote_currency} to {_base_currency} "
+            "using ECB reference rates. "
+            "The benchmark index drawdown remains in its native index level."
+        )
+    except Exception as _fx_exc:
+        st.warning(
+            f"Could not fetch ECB FX rates for {_quote_currency}→{_base_currency}: {_fx_exc}. "
+            f"Results are in the native instrument currency ({_quote_currency}), "
+            "not EUR. Do not treat them as EUR wealth."
+        )
+        _fx_label = f" ⚠ native {_quote_currency} (FX unavailable)"
 
 price_df = instrument_full.loc[start_ts:end_ts]
 

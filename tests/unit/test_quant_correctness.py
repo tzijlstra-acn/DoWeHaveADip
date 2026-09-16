@@ -433,7 +433,7 @@ class TestTieredEpisodeBasis:
 class TestBootstrapPercentiles:
     def test_p10_p50_p90_correct_quantiles(self):
         """P5, P50, P95 fields in PathSimulation use correct quantiles."""
-        from dipdca.quant.monte_carlo import conditional_path_bootstrap
+        from dipdca.quant.legacy_monte_carlo import conditional_path_bootstrap
 
         # Generate a long synthetic price history with some volatility
         rng = np.random.default_rng(42)

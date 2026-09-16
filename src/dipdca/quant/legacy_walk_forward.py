@@ -1,4 +1,9 @@
-"""Walk-forward validation across rolling windows."""
+"""DEPRECATED — do not import in user-facing pages.
+
+Uses ``run_wait_for_dip`` and overlapping rolling windows; replaced by the
+chronological ATH-episode walk-forward in ``dipdca.quant.episode_bootstrap``.
+
+Walk-forward validation across rolling windows."""
 
 from __future__ import annotations
 
