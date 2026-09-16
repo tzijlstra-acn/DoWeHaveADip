@@ -38,7 +38,12 @@ from ui.components import (  # noqa: E402
 )
 from ui.copy import DISCLAIMER_SHORT, LABEL_DCA  # noqa: E402
 from ui.design_tokens import NEUTRAL, POSITIVE, WARNING  # noqa: E402
-from ui.formatting import fmt_currency, fmt_pct  # noqa: E402
+from ui.formatting import (  # noqa: E402
+    compare_outcomes,
+    fmt_currency,
+    fmt_delta,
+    fmt_pct,
+)
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
@@ -71,22 +76,34 @@ etf_symbol = asset_cfg["etf_symbol"]
 index_symbol = asset_cfg.get("index_symbol")
 
 with st.expander("Advanced assumptions"):
-    adv1, adv2, adv3 = st.columns(3)
+    # Only controls the ATH engine actually consumes are exposed here. Max-wait,
+    # emergency buffer and deployment spreading belong to the deprecated
+    # wait-for-dip engine; showing them would imply they change these results.
+    adv1, adv2 = st.columns(2)
     with adv1:
-        max_wait_months = st.slider("Max wait (months, DCA baseline only)", min_value=1, max_value=60, value=24)
-    with adv2:
-        cash_buffer = st.slider("Emergency buffer (months)", 0, 24, 0)
-    with adv3:
         start_date = st.date_input("History start", value=datetime.date(2015, 1, 1))
         end_date = st.date_input("History end", value=datetime.date(2024, 12, 31))
-        fixed_fee = st.number_input("Fixed fee (EUR)", min_value=0.0, value=0.0, step=0.5)
-        pct_fee = st.slider("% fee (bps)", min_value=0, max_value=100, value=10) / 10_000.0
         cash_rate_pct = st.slider(
             "Savings rate on waiting cash (% p.a.)",
             min_value=0.0, max_value=8.0, value=2.5, step=0.25,
             help="Annual interest rate earned on cash held by the ATH-deployment strategy.",
         )
         cash_rate_override = cash_rate_pct / 100.0
+    with adv2:
+        fixed_fee = st.number_input("Fixed fee (EUR)", min_value=0.0, value=0.0, step=0.5)
+        pct_fee = st.slider("% fee (bps)", min_value=0, max_value=100, value=10) / 10_000.0
+        slippage = st.slider(
+            "Slippage (bps)", min_value=0, max_value=50, value=10,
+            help="Applied per trade in addition to the fee. Previously a hidden "
+                 "0.1% default, so setting the fee to zero did not make trading free.",
+        ) / 10_000.0
+
+st.caption(
+    f"Assumptions: {pct_fee * 10_000:.0f} bps fee + {slippage * 10_000:.0f} bps "
+    f"slippage per trade, {fmt_currency(fixed_fee, decimals=2)} fixed fee, "
+    f"{cash_rate_pct:.2f}% p.a. on waiting cash, contributions invested at the "
+    "last trading close of each month."
+)
 
 # ---------------------------------------------------------------------------
 # Warn early if no benchmark index configured
@@ -184,13 +201,11 @@ try:
         initial_cash_reserve=float(cash_available),
         start_date=start_date,
         end_date=end_date,
-        dip_threshold=-0.10,      # kept for run_dca compatibility; not used by ATH engine
-        max_wait_months=max_wait_months,
+        contribution_timing="month_end",
+        dip_threshold=-0.10,      # required by the model; unused by the ATH engine
         fixed_fee=fixed_fee,
         pct_fee=pct_fee,
-        deployment_pct=1.0,
-        cash_buffer_months=cash_buffer,
-        deploy_spread_months=1,
+        slippage=slippage,
         cash_rate_override=cash_rate_override if cash_rate_override > 0 else None,
     )
 except Exception as exc:
@@ -479,23 +494,28 @@ with tab_history:
                 st.error(f"Backtest failed: {exc}")
                 st.stop()
 
-        # Conclusion
-        diff = ath_result.ending_wealth - dca_result.ending_wealth
-        if abs(diff) < 1:
-            conclusion = "Both strategies ended at essentially the same wealth over this period."
-            conclusion_color = NEUTRAL
-        elif diff > 0:
+        # Conclusion. A flat EUR 1 tie band hid real differences on small
+        # portfolios and called genuine gaps ties; the tolerance is relative and
+        # the figure carries cents plus a percentage.
+        verdict, diff = compare_outcomes(
+            ath_result.ending_wealth,
+            dca_result.ending_wealth,
+            "ATH dip deployment",
+            "Monthly DCA",
+        )
+        if verdict == "Effectively equal":
             conclusion = (
-                f"ATH dip deployment came out ahead by {fmt_currency(abs(diff))} in this period. "
-                "Past outcomes do not predict future results."
+                "Both strategies ended at effectively the same wealth over this "
+                f"period — a difference of {fmt_delta(diff, dca_result.ending_wealth)}."
             )
-            conclusion_color = POSITIVE
+            conclusion_color = NEUTRAL
         else:
             conclusion = (
-                f"Monthly DCA came out ahead by {fmt_currency(abs(diff))} in this period. "
+                f"{verdict.replace(' ahead', '')} came out ahead by "
+                f"{fmt_delta(abs(diff), dca_result.ending_wealth)} in this period. "
                 "Past outcomes do not predict future results."
             )
-            conclusion_color = WARNING
+            conclusion_color = POSITIVE if diff > 0 else WARNING
 
         conclusion_banner(conclusion, color=conclusion_color)
 

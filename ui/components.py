@@ -26,7 +26,7 @@ from ui.design_tokens import (
     TEXT_SECONDARY,
     WARNING,
 )
-from ui.formatting import fmt_pct
+from ui.formatting import compare_outcomes, fmt_pct
 
 
 def demo_banner() -> None:
@@ -73,15 +73,32 @@ def metric_card(
 
 
 def strategy_metrics(result: StrategyResult, currency: str = "EUR") -> None:
-    """Display a row of metric cards for a StrategyResult."""
+    """Display a row of metric cards for a StrategyResult.
+
+    Drawdown is reported from the flow-adjusted NAV. The raw-wealth figure on
+    ``result.max_drawdown`` treats a contribution as a rise in the portfolio peak,
+    so it overstates the drawdown an investor actually experienced.
+    """
     cols = st.columns(5)
     with cols[0]:
         st.metric("Ending Wealth", f"{currency} {result.ending_wealth:,.0f}")
     with cols[1]:
         xirr_val = f"{result.xirr:.1%}" if result.xirr is not None else "N/A"
-        st.metric("XIRR", xirr_val)
+        st.metric(
+            "Annualised return",
+            xirr_val,
+            help="Money-weighted return (XIRR), which accounts for contribution timing.",
+        )
     with cols[2]:
-        st.metric("Max Drawdown", f"{result.max_drawdown:.1%}")
+        if result.nav_mdd is not None:
+            st.metric(
+                "Max drawdown",
+                f"{result.nav_mdd:.1%}",
+                help="Deepest fall in flow-adjusted NAV, so contributions do not "
+                     "move the peak. Investment experience, not account balance.",
+            )
+        else:
+            st.metric("Max drawdown", "N/A")
     with cols[3]:
         st.metric("Time in Market", f"{result.time_in_market_pct:.1%}")
     with cols[4]:
@@ -93,10 +110,29 @@ def strategy_comparison_cards(
     dip_result: StrategyResult,
     currency: str = "EUR",
 ) -> None:
-    """Side-by-side comparison cards for DCA vs Wait-for-dip."""
-    dca_wins = dca_result.ending_wealth >= dip_result.ending_wealth
-    diff = abs(dca_result.ending_wealth - dip_result.ending_wealth)
-    winner_label = "Invest monthly came out ahead" if dca_wins else "Wait-for-dip came out ahead"
+    """Side-by-side comparison cards for DCA vs Wait-for-dip.
+
+    Three outcome states, because ``dca >= dip`` would report an exact tie as DCA
+    winning by zero.
+    """
+    verdict, signed_diff = compare_outcomes(
+        dip_result.ending_wealth,
+        dca_result.ending_wealth,
+        "Wait-for-dip",
+        "Invest monthly",
+    )
+    is_tie = verdict == "Effectively equal"
+    dca_wins = (not is_tie) and signed_diff < 0
+    dip_wins = (not is_tie) and signed_diff > 0
+    diff = abs(signed_diff)
+
+    if is_tie:
+        winner_label = "Effectively equal"
+        diff_label = "difference is negligible"
+    else:
+        winner_label = f"{verdict.replace(' ahead', '')} came out ahead"
+        rel = diff / dca_result.ending_wealth if dca_result.ending_wealth else 0.0
+        diff_label = f"by {currency} {diff:,.2f} ({rel:+.3%})"
 
     col1, col_mid, col2 = st.columns([2, 1, 2])
 
@@ -110,7 +146,7 @@ def strategy_comparison_cards(
                 <p style="font-size:2em;margin:8px 0;font-weight:bold;
                           color:{TEXT_PRIMARY}">{currency} {dca_result.ending_wealth:,.0f}</p>
                 <p style="margin:4px 0;color:{TEXT_SECONDARY}">Ann. return: {fmt_pct(dca_result.xirr)}</p>
-                <p style="margin:4px 0;color:{TEXT_SECONDARY}">Max DD: {fmt_pct(dca_result.max_drawdown)}</p>
+                <p style="margin:4px 0;color:{TEXT_SECONDARY}">Max DD (NAV): {fmt_pct(dca_result.nav_mdd)}</p>
                 <p style="margin:4px 0;color:{TEXT_SECONDARY}">In market: {fmt_pct(dca_result.time_in_market_pct)}</p>
             </div>
             """,
@@ -123,14 +159,14 @@ def strategy_comparison_cards(
             <div style="text-align:center;padding:20px 0;">
                 <p style="font-size:0.85em;color:{TEXT_PRIMARY};font-weight:bold;
                           margin:8px 0">{winner_label}</p>
-                <p style="font-size:0.8em;color:{TEXT_SECONDARY}">by {currency} {diff:,.0f}</p>
+                <p style="font-size:0.8em;color:{TEXT_SECONDARY}">{diff_label}</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     with col2:
-        border_color = POSITIVE if not dca_wins else BORDER
+        border_color = POSITIVE if dip_wins else BORDER
         st.markdown(
             f"""
             <div style="border:2px solid {border_color};border-radius:{RADIUS_LG};
@@ -139,7 +175,7 @@ def strategy_comparison_cards(
                 <p style="font-size:2em;margin:8px 0;font-weight:bold;
                           color:{TEXT_PRIMARY}">{currency} {dip_result.ending_wealth:,.0f}</p>
                 <p style="margin:4px 0;color:{TEXT_SECONDARY}">Ann. return: {fmt_pct(dip_result.xirr)}</p>
-                <p style="margin:4px 0;color:{TEXT_SECONDARY}">Max DD: {fmt_pct(dip_result.max_drawdown)}</p>
+                <p style="margin:4px 0;color:{TEXT_SECONDARY}">Max DD (NAV): {fmt_pct(dip_result.nav_mdd)}</p>
                 <p style="margin:4px 0;color:{TEXT_SECONDARY}">In market: {fmt_pct(dip_result.time_in_market_pct)}</p>
             </div>
             """,

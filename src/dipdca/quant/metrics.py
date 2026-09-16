@@ -17,15 +17,23 @@ def flow_adjusted_returns(
     wealth: pd.Series,
     external_flows: pd.Series,
 ) -> pd.Series:
-    """Beginning-of-period flow-adjusted daily returns.
+    """End-of-period flow-adjusted daily returns.
 
-    Convention: external flows book at the BEGINNING of the period (i.e. a
-    contribution arrives and is invested before the close is recorded).
+        r_t = (V_t - F_t) / V_{t-1} - 1
 
-        r_t = V_t / (V_{t-1} + F_t) - 1
+    Convention: external flows book at the END of the period. This matches the
+    backtest's event order, which accrues interest, receives the contribution,
+    executes the purchase at the CURRENT close, and only then values the
+    portfolio. The contribution therefore earns nothing during period t.
 
-    A pure deposit on a flat-price day produces r_t = 0.
-    A pure market gain with no deposit produces the correct price return.
+    Using the beginning-of-period form ``V_t / (V_{t-1} + F_t) - 1`` against this
+    event order understates the return whenever a contribution coincides with a
+    market move. With V_{t-1}=100 appreciating to 110 and a 100 contribution
+    arriving at the close (V_t=210), that form gives 210/200-1 = 5%, while the
+    investment actually returned 110/100-1 = 10%.
+
+    A pure deposit on a flat-price day produces r_t = 0 under either form; the
+    two diverge only when a flow and a price move share a period.
 
     Args:
         wealth: Daily total portfolio wealth series (cash + market value).
@@ -39,8 +47,7 @@ def flow_adjusted_returns(
     """
     flows = external_flows.reindex(wealth.index).fillna(0.0)
     prev_wealth = wealth.shift(1)
-    denominator = prev_wealth + flows
-    returns = (wealth / denominator - 1).where(denominator > 0)
+    returns = ((wealth - flows) / prev_wealth - 1).where(prev_wealth > 0)
     return returns.dropna()
 
 

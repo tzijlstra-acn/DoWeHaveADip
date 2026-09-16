@@ -168,9 +168,13 @@ class TestFlowAdjustedReturnPurity:
         assert fa_ret.iloc[0] == pytest.approx(0.10, rel=1e-6)
 
     def test_deposit_plus_gain_correct_return(self):
-        """Deposit of 500 plus 10% market gain on 1000 → r_t = 10%."""
-        wealth = pd.Series([1000.0, 1650.0], index=pd.bdate_range("2020-01-01", periods=2))
-        # 1000 prev + 500 deposit = 1500 basis; 10% gain = 1650
+        """Deposit of 500 plus 10% market gain on 1000 → r_t = 10%.
+
+        End-of-period flows: the engine invests the contribution at the CURRENT
+        close, so it earns nothing that day. Holdings go 1000 -> 1100 and the 500
+        lands on top, giving V_t = 1600.
+        """
+        wealth = pd.Series([1000.0, 1600.0], index=pd.bdate_range("2020-01-01", periods=2))
         flows = pd.Series([0.0, 500.0], index=wealth.index)
 
         fa_ret = flow_adjusted_returns(wealth, flows)
@@ -183,18 +187,22 @@ class TestFlowAdjustedReturnPurity:
 
 class TestFlowAdjustedContributionSize:
     def test_small_and_large_contribution_same_return(self):
-        """Same market return with different contribution sizes → same flow-adj return."""
+        """Same market return with different contribution sizes → same flow-adj return.
+
+        End-of-period flows: holdings return 10% (1000 -> 1100) and the deposit
+        lands on top at the close, so V_t = 1100 + deposit.
+        """
         idx = pd.bdate_range("2020-01-01", periods=2)
-        # 10% market gain; deposit arrives at period start → V_t = (prev + deposit) * 1.10
-        wealth_small = pd.Series([1000.0, 1210.0], index=idx)  # (1000+100)*1.10 = 1210
+        wealth_small = pd.Series([1000.0, 1200.0], index=idx)   # 1100 + 100
         flows_small = pd.Series([0.0, 100.0], index=idx)
 
-        wealth_large = pd.Series([1000.0, 6600.0], index=idx)  # (1000+5000)*1.10 = 6600
+        wealth_large = pd.Series([1000.0, 6100.0], index=idx)   # 1100 + 5000
         flows_large = pd.Series([0.0, 5000.0], index=idx)
 
         r_small = flow_adjusted_returns(wealth_small, flows_small).iloc[0]
         r_large = flow_adjusted_returns(wealth_large, flows_large).iloc[0]
 
+        assert r_small == pytest.approx(0.10, rel=1e-6)
         assert r_small == pytest.approx(r_large, rel=1e-6)
 
 
@@ -206,11 +214,11 @@ class TestFlowAdjustedMetrics:
     def test_twr_unaffected_by_large_deposit(self):
         """TWR is computed from NAV, not from raw wealth pct_change."""
         # 3 days: flat, then +10%, then flat. One large deposit on day 2.
-        # Beginning-of-period: deposit arrives first, then return applies.
-        # V_t = (V_{t-1} + F_t) * (1 + r_t) → r_t = V_t/(V_{t-1}+F_t) - 1
+        # End-of-period: the deposit is invested at the CURRENT close, so it earns
+        # nothing that day. V_t = V_{t-1} * (1 + r_t) + F_t
         idx = pd.bdate_range("2020-01-01", periods=3)
-        wealth = pd.Series([1000.0, 12100.0, 12100.0], index=idx)
-        # Day 2: 10000 deposit → basis = 1000+10000 = 11000; 10% gain → 12100
+        wealth = pd.Series([1000.0, 11100.0, 11100.0], index=idx)
+        # Day 2: holdings 1000 -> 1100, then a 10000 deposit lands → 11100
         flows = pd.Series([0.0, 10000.0, 0.0], index=idx)
 
         fa_ret = flow_adjusted_returns(wealth, flows)
