@@ -42,6 +42,7 @@ from dipdca.quant.ath_episodes import (  # noqa: E402
     summarise_threshold,
 )
 from dipdca.quant.drawdown import drawdown  # noqa: E402
+from dipdca.quant.episode_bootstrap import bootstrap_win_rate  # noqa: E402
 from dipdca.quant.fx import instrument_to_base_currency  # noqa: E402
 from ui.components import freshness_caption, live_data_error, page_header  # noqa: E402
 from ui.copy import DISCLAIMER_SHORT  # noqa: E402
@@ -344,12 +345,23 @@ with tab_summary:
             def _pct(v):
                 return v * 100 if v is not None else None
 
+            # Bootstrap CI on win rate (None → <2 eligible episodes)
+            boot = bootstrap_win_rate(
+                studies, threshold=th, horizon_label=horizon_label, policy=policy,
+                n_boot=1_000, seed=42,
+            )
+            ci_str = (
+                f"[{boot.ci_lower:.0%}, {boot.ci_upper:.0%}]"
+                if boot is not None else "n/a"
+            )
+
             rows.append({
                 "Threshold": f"{th:.0%}",
                 "Episodes": s["episodes"],
                 "Still open": s["censored"],
                 "% actually traded": _pct(s["pct_episodes_deployed"]),
                 "% ahead of DCA": _pct(s["pct_ahead_of_dca"]),
+                "95% CI on win rate": ci_str,
                 "Median vs DCA": _pct(s["median_vs_dca"]),
                 "P10 vs DCA": _pct(s["p10_vs_dca"]),
                 "P90 vs DCA": _pct(s["p90_vs_dca"]),
