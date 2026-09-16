@@ -23,7 +23,7 @@ PAGES = Path(__file__).resolve().parents[2] / "app_pages"
 DEPRECATED = ("run_wait_for_dip", "run_parameter_sweep")
 
 # Pages still awaiting migration. Each entry is a known gap, not an exemption.
-NOT_YET_MIGRATED = {"advanced_exit.py"}
+NOT_YET_MIGRATED: set[str] = set()
 
 
 def page_files() -> list[Path]:
@@ -63,6 +63,31 @@ def test_scenarios_page_loads_the_benchmark_index():
     src = (PAGES / "scenarios.py").read_text(encoding="utf-8")
 
     assert "index_symbol" in src
+
+
+def test_exit_page_uses_ath_engine_and_flow_adjusted_nav():
+    """Exit rules must run on the ATH engine and decide on NAV, not raw wealth."""
+    src = (PAGES / "advanced_exit.py").read_text(encoding="utf-8")
+
+    assert "run_ath_deployment" in src
+    assert "ledger_nav" in src
+    assert "index_symbol" in src
+    for sym in DEPRECATED:
+        assert sym not in src
+
+
+def test_exit_page_passes_a_common_terminal_date():
+    """Exit and never-sell must be valued on the same day."""
+    src = (PAGES / "advanced_exit.py").read_text(encoding="utf-8")
+
+    assert "terminal_date" in src
+
+
+def test_exit_page_does_not_take_a_free_text_ticker():
+    """A raw symbol box bypasses the configured index/ETF pairing."""
+    src = (PAGES / "advanced_exit.py").read_text(encoding="utf-8")
+
+    assert "text_input" not in src
 
 
 def test_migration_tracker_only_lists_real_pages():
