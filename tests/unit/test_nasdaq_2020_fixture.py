@@ -26,6 +26,7 @@ from datetime import date
 import pandas as pd
 
 from dipdca.models import DeploymentTier, SimulationParams
+from dipdca.quant.ath_episodes import find_ath_episodes
 from dipdca.quant.backtest import run_ath_deployment
 from dipdca.quant.drawdown import drawdown
 
@@ -127,6 +128,49 @@ class TestBenchmarkSignalDates:
 
         assert dd[dd <= -0.20].index[0] == pd.Timestamp("2020-03-12")
         assert dd[dd <= -0.25].index[0] == pd.Timestamp("2020-03-12")
+
+
+class TestEpisodeDetectionOnRealData:
+    """The 2020 crash must resolve to exactly one episode with audited dates."""
+
+    THRESHOLDS = (-0.10, -0.15, -0.20, -0.25, -0.30)
+
+    def _episode(self):
+        eps = find_ath_episodes(ndx_frame()["adj_close"], thresholds=self.THRESHOLDS)
+        assert len(eps) == 1, f"expected one episode, got {len(eps)}"
+        return eps[0]
+
+    def test_whole_crash_is_a_single_episode(self):
+        """26 trading days below the ATH is one observation, not 26."""
+        ep = self._episode()
+
+        assert ep.ath_date == pd.Timestamp("2020-02-19")
+        assert abs(ep.ath_level - ATH_2020_02_19) < 0.01
+
+    def test_trough_is_2020_03_23(self):
+        ep = self._episode()
+
+        assert ep.trough_date == pd.Timestamp("2020-03-23")
+        assert -0.30 < ep.trough_drawdown < -0.29
+
+    def test_audited_first_crossings(self):
+        ep = self._episode()
+
+        assert ep.first_crossings[-0.15] == pd.Timestamp("2020-03-09")
+        assert ep.first_crossings[-0.20] == pd.Timestamp("2020-03-12")
+        assert ep.first_crossings[-0.25] == pd.Timestamp("2020-03-12")
+
+    def test_never_reached_30_percent(self):
+        ep = self._episode()
+
+        assert not ep.crossed(-0.30)
+
+    def test_episode_is_censored_because_recovery_was_in_june(self):
+        """The fixture stops 2020-03-31; the ATH was not reclaimed until June."""
+        ep = self._episode()
+
+        assert ep.is_censored
+        assert ep.recovery_date is None
 
 
 class TestEngineFindsTheWinningCase:

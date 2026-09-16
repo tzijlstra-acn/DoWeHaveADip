@@ -125,7 +125,16 @@ class SimulationParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     monthly_contribution: float = Field(gt=0, description="EUR/CHF contributed each month")
-    payday: int = Field(ge=1, le=28, description="Day of month salary arrives")
+    payday: int = Field(ge=1, le=28, description="Day of month salary arrives (fixed_day timing only)")
+    contribution_timing: Literal["month_end", "fixed_day", "month_start"] = Field(
+        default="month_end",
+        description=(
+            "When the monthly amount is invested. 'month_end' (default) uses the last "
+            "valid trading close of each month, which is the convention the "
+            "DCA-versus-timing comparison is specified against. 'fixed_day' invests at "
+            "the next trading close on or after `payday`."
+        ),
+    )
     initial_investment: float = Field(ge=0, default=0.0, description="Lump sum deployed immediately on day 1 in all strategies")
     initial_cash_reserve: float = Field(ge=0, default=0.0, description="Cash held waiting for dip in dip strategies; deployed on day 1 in DCA")
     country: str = "NL"

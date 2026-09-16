@@ -1,4 +1,14 @@
-﻿"""Historical scenarios — parameter sweep and conditional path bootstrap."""
+"""Historical scenarios — ATH-episode event study.
+
+Answers the conditional question: given the benchmark index has just fallen X%
+below its previous all-time high, what happened next?
+
+The unit of observation is the drawdown episode, not the calendar. Each episode is
+anchored to one all-time high, records only the FIRST crossing of each threshold,
+and closes only when that same high is recovered. Adjacent crash days therefore
+cannot be counted as separate scenarios, and a few winning crashes cannot be
+averaged away inside years of cash drag.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +18,7 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 ROOT = Path(__file__).parent.parent
@@ -22,271 +33,368 @@ def _make_fp(params: dict) -> str:
 from dipdca.config import load_assets_config  # noqa: E402
 from dipdca.data.errors import LiveDataUnavailable  # noqa: E402
 from dipdca.data.service import get_market_data_service  # noqa: E402
-from dipdca.models import SimulationParams  # noqa: E402
-from dipdca.quant.monte_carlo import (  # noqa: E402
-    conditional_path_bootstrap,
-    outperformance_pivot,
-    run_parameter_sweep,
-    sweep_to_dataframe,
-    win_rate_pivot,
+from dipdca.models import DeploymentTier  # noqa: E402
+from dipdca.quant.ath_episodes import (  # noqa: E402
+    episodes_to_dataframe,
+    find_ath_episodes,
+    run_event_study,
+    summarise_threshold,
 )
-from ui.charts import plot_fan_chart, plot_sweep_heatmap  # noqa: E402
+from dipdca.quant.drawdown import drawdown  # noqa: E402
 from ui.components import freshness_caption, live_data_error, page_header  # noqa: E402
 from ui.copy import DISCLAIMER_SHORT  # noqa: E402
+from ui.formatting import fmt_pct  # noqa: E402
 from ui.theme import GLOBAL_CSS  # noqa: E402
 
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 page_header(
     "HISTORICAL SCENARIOS",
-    "Past market states with a similar drawdown — what happened next. "
-    "Real data, not a prediction.",
+    "Independent all-time-high episodes — what actually happened after each "
+    "threshold was first crossed. Real data, not a prediction.",
 )
 
 # ---------------------------------------------------------------------------
 # Inputs
 # ---------------------------------------------------------------------------
 _assets_cfg = load_assets_config()
-_asset_options = {a["display_name"]: a["etf_symbol"] for a in _assets_cfg}
-_asset_names = list(_asset_options.keys())
+_asset_map = {a["display_name"]: a for a in _assets_cfg}
+_asset_names = list(_asset_map.keys())
 _default_idx = next((i for i, n in enumerate(_asset_names) if "S&P 500" in n), 0)
 
 col_a, col_b, col_c = st.columns([3, 2, 2])
 with col_a:
     selected_name = st.selectbox("Market or ETF", _asset_names, index=_default_idx)
 with col_b:
-    monthly_contribution = st.number_input("Monthly amount (EUR)", min_value=10, max_value=100_000, value=500, step=50)
+    monthly_contribution = st.number_input(
+        "Monthly savings (EUR)", min_value=10, max_value=100_000, value=1000, step=50
+    )
 with col_c:
-    cash_available = st.number_input("Cash to deploy (EUR)", min_value=0, max_value=1_000_000, value=0, step=100)
+    opening_reserve = st.number_input(
+        "Savings already accumulated at each ATH (EUR)",
+        min_value=0, max_value=1_000_000, value=12_000, step=1_000,
+        help="Cash on hand when each episode begins — the capital the timing "
+             "decision is made about.",
+    )
 
-symbol = _asset_options[selected_name]
+asset_cfg = _asset_map[selected_name]
+etf_symbol = asset_cfg["etf_symbol"]
+index_symbol = asset_cfg.get("index_symbol")
+has_benchmark = index_symbol is not None
 
 with st.expander("Advanced settings"):
     adv1, adv2 = st.columns(2)
     with adv1:
-        start_date = st.date_input("History start", value=datetime.date(2005, 1, 1))
+        start_date = st.date_input("History start", value=datetime.date(2000, 1, 1))
         end_date = st.date_input("History end", value=datetime.date.today())
-        monthly_sim = st.number_input("Monthly contribution in simulation (EUR)", min_value=0, value=int(monthly_contribution), step=50)
-    with adv2:
-        cp_horizon = st.select_slider("Horizon (months)", options=[6, 12, 18, 24, 36], value=12)
-        cp_n_sims = st.slider("Number of draws", min_value=50, max_value=500, value=200, step=50)
-        cp_deploy_pcts_raw = st.multiselect(
-            "Deploy fractions to show",
-            options=["0%", "25%", "50%", "75%", "100%"],
-            default=["0%", "50%", "100%"],
+        cash_rate_pct = st.slider(
+            "Savings rate on waiting cash (% p.a.)",
+            min_value=0.0, max_value=8.0, value=2.0, step=0.25,
         )
-        cp_deploy_pcts = [float(d.replace("%", "")) / 100.0 for d in cp_deploy_pcts_raw] or [0.0, 0.5, 1.0]
-        window_years = st.select_slider("Rolling window size (years)", options=[5, 10, 15, 20], value=10)
+    with adv2:
+        threshold_options = [-0.10, -0.15, -0.20, -0.25, -0.30, -0.35, -0.40]
+        selected_thresholds_raw = st.multiselect(
+            "Thresholds to study",
+            options=[f"{t:.0%}" for t in threshold_options],
+            default=["-10%", "-15%", "-20%", "-25%", "-30%"],
+        )
+        thresholds = tuple(
+            sorted(
+                (float(t.replace("%", "")) / 100.0 for t in selected_thresholds_raw),
+                reverse=True,
+            )
+        ) or (-0.10, -0.15, -0.20, -0.25, -0.30)
+
+        horizon_raw = st.multiselect(
+            "Horizons after the ATH",
+            options=["12m", "36m", "60m"],
+            default=["12m", "36m"],
+        )
+        horizon_months = tuple(
+            sorted(int(h.replace("m", "")) for h in horizon_raw)
+        ) or (12,)
+        pct_fee = st.slider("% fee (bps)", min_value=0, max_value=100, value=10) / 10_000.0
+        slippage = st.slider("Slippage (bps)", min_value=0, max_value=50, value=10) / 10_000.0
+
+st.caption(
+    f"Assumptions: {pct_fee * 10_000:.0f} bps fee and {slippage * 10_000:.0f} bps "
+    f"slippage per trade, {cash_rate_pct:.2f}% p.a. on waiting cash, "
+    "contributions invested at the last trading close of each month."
+)
+
+if not has_benchmark:
+    st.warning(
+        f"**{selected_name}** has no configured benchmark index (`index_symbol` is "
+        "null in assets.yaml), so the ETF price is used as its own drawdown signal. "
+        "Results are ETF-proxy mode and may differ from the underlying index."
+    )
 
 # ---------------------------------------------------------------------------
-# Load market data
+# Load market data — benchmark drives the signal, ETF supplies execution prices
 # ---------------------------------------------------------------------------
 with st.spinner(f"Loading {selected_name} data..."):
     try:
-        _result = get_market_data_service().get_history(symbol, start_date, end_date)
-        price_df = _result.frame
+        _inst_result = get_market_data_service().get_history(etf_symbol, start_date, end_date)
+        instrument_df = _inst_result.frame
+
+        if has_benchmark:
+            _bm_result = get_market_data_service().get_history(index_symbol, start_date, end_date)
+            benchmark_df = _bm_result.frame
+            freshness_caption(_bm_result.freshness)
+        else:
+            benchmark_df = instrument_df
+            freshness_caption(_inst_result.freshness)
     except LiveDataUnavailable as exc:
         live_data_error(exc, context=selected_name)
         st.stop()
 
-freshness_caption(_result.freshness)
-price_series = price_df["adj_close"].dropna()
-
-if len(price_series) < 60:
-    st.error("Not enough history for scenario analysis. Try an earlier start date.")
+if len(instrument_df) < 60 or len(benchmark_df) < 60:
+    st.error("Not enough history for episode analysis. Try an earlier start date.")
     st.stop()
 
-from dipdca.quant.drawdown import drawdown  # noqa: E402
-
-dd_series = drawdown(price_series)
-current_dd = float(dd_series.iloc[-1])
-
-st.info(
-    f"**{selected_name}** is currently {current_dd:.1%} from its previous high. "
-    f"Scenarios below are based on {len(price_series):,} historical trading days "
-    f"({start_date} – {end_date})."
-)
+signal_label = index_symbol if has_benchmark else f"{etf_symbol} (ETF proxy)"
+bm_series = benchmark_df["adj_close"].dropna()
+current_dd = float(drawdown(bm_series).iloc[-1])
 
 # ---------------------------------------------------------------------------
-# Tabs
+# Episodes
 # ---------------------------------------------------------------------------
-tab_paths, tab_sweep = st.tabs(["Historical scenarios", "Threshold sweep"])
+episodes = find_ath_episodes(bm_series, thresholds=thresholds)
+recovered = [e for e in episodes if not e.is_censored]
+censored = [e for e in episodes if e.is_censored]
+
+m1, m2, m3, m4 = st.columns(4)
+with m1:
+    st.metric(f"Current drawdown ({signal_label})", fmt_pct(current_dd))
+with m2:
+    st.metric("Independent episodes", f"{len(episodes)}")
+with m3:
+    st.metric("Recovered", f"{len(recovered)}")
+with m4:
+    st.metric(
+        "Still open",
+        f"{len(censored)}",
+        help="Episodes whose all-time high was never reclaimed within the data. "
+             "Reported separately — not counted as recoveries.",
+    )
+
+if not episodes:
+    st.info(
+        f"No episode in this window reached {max(thresholds):.0%}. "
+        "Try an earlier start date or a shallower threshold."
+    )
+    st.stop()
+
+tab_summary, tab_episodes = st.tabs(["Threshold summary", "Episode log"])
 
 # ---------------------------------------------------------------------------
-# Tab 1: Conditional path bootstrap
+# Tab 1: per-threshold event study
 # ---------------------------------------------------------------------------
-with tab_paths:
+with tab_summary:
     st.markdown(
-        "The chart below shows the distribution of historical outcomes when "
-        f"**{selected_name}** was at a similar drawdown level ({current_dd:.1%} ± 5%). "
-        f"Outcomes are shown over a **{cp_horizon}-month horizon**."
+        "For each threshold, every independent episode that crossed it is one "
+        "observation. Percentiles are shown rather than an average, because the "
+        "distribution is skewed and a single mean hides the cases of interest."
     )
 
-    _cp_fp_params = {
-        "symbol": symbol, "start": str(start_date), "end": str(end_date),
-        "current_dd": round(current_dd, 4), "monthly": int(monthly_sim),
-        "cash": int(cash_available), "horizon": cp_horizon,
-        "n_sims": cp_n_sims, "deploys": sorted(cp_deploy_pcts),
-    }
-    _cp_fp = _make_fp(_cp_fp_params)
+    default_tiers_df = pd.DataFrame({
+        "Drawdown threshold (%)": [-15, -25, -35],
+        "Total savings deployed by this level (%)": [25, 60, 100],
+    })
+    st.subheader("Tiered schedule (for the 'ATH tiered' policy)")
+    tiers_df = st.data_editor(
+        default_tiers_df,
+        num_rows="dynamic",
+        width="stretch",
+        key="scenario_tiers",
+        column_config={
+            "Drawdown threshold (%)": st.column_config.NumberColumn(
+                "Drawdown threshold (%)", min_value=-99, max_value=-1, step=1
+            ),
+            "Total savings deployed by this level (%)": st.column_config.NumberColumn(
+                "Total savings deployed by this level (%)", min_value=1, max_value=100, step=1
+            ),
+        },
+    )
 
-    _stored_cp = st.session_state.get("scenarios_cp_sims")
-    if _stored_cp and isinstance(_stored_cp, dict) and _stored_cp.get("fp") == _cp_fp:
-        cp_sims = _stored_cp["data"]
+    policy = st.radio(
+        "Policy to compare against month-end DCA",
+        options=["ATH all-in", "ATH tiered", "Savings only"],
+        horizontal=True,
+    )
+    horizon_label = st.radio(
+        "Measured at",
+        options=[f"{m}m" for m in horizon_months] + ["recovery"],
+        horizontal=True,
+        help="'recovery' measures at the date the anchor all-time high was "
+             "reclaimed, and is available only for recovered episodes.",
+    )
+
+    _fp = _make_fp({
+        "etf": etf_symbol, "index": index_symbol,
+        "start": str(start_date), "end": str(end_date),
+        "monthly": int(monthly_contribution), "reserve": int(opening_reserve),
+        "thresholds": list(thresholds), "horizons": list(horizon_months),
+        "tiers": tiers_df.to_dict(), "rate": cash_rate_pct,
+        "fee": pct_fee, "slip": slippage,
+    })
+    _stored = st.session_state.get("scenarios_event_study")
+    if _stored and isinstance(_stored, dict) and _stored.get("fp") == _fp:
+        studies = _stored["data"]
     else:
-        if _stored_cp:
-            st.info("Parameters changed — click Run to update results.")
-        cp_sims = []
+        if _stored:
+            st.info("Parameters changed — run the study again to update results.")
+        studies = []
 
-    if st.button("Run historical scenario analysis", type="primary"):
-        with st.spinner(f"Finding historical periods similar to {current_dd:.1%} drawdown..."):
-            monthly_prices = price_series.resample("ME").last().dropna()
-            cp_sims = conditional_path_bootstrap(
-                prices=monthly_prices,
-                current_drawdown=current_dd,
-                deploy_pcts=cp_deploy_pcts,
-                monthly_contribution=float(monthly_sim),
-                cash_accumulated=float(cash_available),
-                horizon_months=cp_horizon,
-                n_simulations=cp_n_sims,
-                seed=42,
-            )
-            st.session_state["scenarios_cp_sims"] = {"fp": _cp_fp, "data": cp_sims}
-
-    if cp_sims:
-        # Count matching periods
-        tol = 0.05
-        n_periods = int((
-            (dd_series <= current_dd + tol) & (dd_series >= current_dd - tol)
-        ).sum())
-        st.caption(f"Based on {n_periods} historical periods with similar drawdown.")
-
-        deploy_labels = {
-            0.0: "Invest monthly, no lump sum",
-            0.25: "Deploy 25% of cash",
-            0.5: "Deploy 50% of cash",
-            0.75: "Deploy 75% of cash",
-            1.0: "Deploy all cash",
-        }
-
-        for sim in cp_sims:
-            dlabel = deploy_labels.get(sim.deploy_pct, f"Deploy {sim.deploy_pct:.0%}")
-            st.subheader(dlabel)
-            cols_m = st.columns(3)
-            with cols_m[0]:
-                st.metric("Worst case (P5)", f"EUR {sim.p5_wealth[-1]:,.0f}",
-                          help="5th percentile outcome at end of horizon — 1-in-20 bad draw")
-            with cols_m[1]:
-                st.metric("Typical (P50)", f"EUR {sim.p50_wealth[-1]:,.0f}")
-            with cols_m[2]:
-                st.metric("Best case (P95)", f"EUR {sim.p95_wealth[-1]:,.0f}",
-                          help="95th percentile outcome at end of horizon — 1-in-20 good draw")
-            st.metric(
-                "Beat monthly DCA",
-                f"{sim.prob_beats_dca:.0%}",
-                help="Fraction of historical draws where this strategy ended ahead of monthly DCA",
-            )
-            fig_fan = plot_fan_chart([sim], currency="EUR", horizon_months=cp_horizon)
-            st.plotly_chart(fig_fan, width="stretch")
-
-    elif not cp_sims and st.session_state.get("scenarios_cp_sims"):
-        st.info(
-            "Not enough historical periods found at this drawdown level. "
-            "Try a wider date range or a larger tolerance."
-        )
-
-# ---------------------------------------------------------------------------
-# Tab 2: Threshold sweep
-# ---------------------------------------------------------------------------
-with tab_sweep:
-    st.markdown(
-        "Grid search over dip thresholds and deployment fractions. "
-        "For each combination, shows the historical win rate vs monthly DCA "
-        "across all rolling windows in the dataset."
-    )
-
-    st.subheader("Threshold grid")
-    threshold_options = [-0.05, -0.10, -0.15, -0.20, -0.25, -0.30, -0.40]
-    selected_thresholds_raw = st.multiselect(
-        "Dip thresholds",
-        options=[f"{t:.0%}" for t in threshold_options],
-        default=["-5%", "-10%", "-15%", "-20%", "-25%"],
-    )
-    thresholds = [float(t.replace("%", "")) / 100.0 for t in selected_thresholds_raw] or threshold_options[:5]
-
-    deploy_options = [0.25, 0.50, 0.75, 1.00]
-    selected_deploys_raw = st.multiselect(
-        "Deploy fractions",
-        options=[f"{d:.0%}" for d in deploy_options],
-        default=["25%", "50%", "75%", "100%"],
-    )
-    deploy_pcts_sweep = [float(d.replace("%", "")) / 100.0 for d in selected_deploys_raw] or deploy_options
-
-    _sweep_fp_params = {
-        "symbol": symbol, "start": str(start_date), "end": str(end_date),
-        "thresholds": sorted(thresholds), "deploys": sorted(deploy_pcts_sweep),
-        "window_years": window_years, "monthly": int(monthly_contribution),
-    }
-    _sweep_fp = _make_fp(_sweep_fp_params)
-    _stored_sweep = st.session_state.get("scenarios_sweep_cache")
-    if _stored_sweep and isinstance(_stored_sweep, dict) and _stored_sweep.get("fp") == _sweep_fp:
-        sweep_results = _stored_sweep["data"]
-    else:
-        if _stored_sweep:
-            st.info("Parameters changed — click Run to update the sweep.")
-        sweep_results = []
-
-    if st.button("Run threshold sweep", type="primary", key="run_sweep"):
+    if st.button("Run episode event study", type="primary"):
         try:
-            base_params = SimulationParams(
-                monthly_contribution=float(monthly_contribution),
-                payday=25,
-                start_date=start_date,
-                end_date=end_date,
+            tiers = sorted(
+                [
+                    DeploymentTier(
+                        drawdown_threshold=float(r["Drawdown threshold (%)"]) / 100.0,
+                        cumulative_deployment_fraction=float(
+                            r["Total savings deployed by this level (%)"]
+                        ) / 100.0,
+                    )
+                    for _, r in tiers_df.iterrows()
+                ],
+                key=lambda t: t.drawdown_threshold,
+                reverse=True,
             )
+            DeploymentTier.validate_schedule(tiers)
         except Exception as exc:
-            st.error(f"Invalid parameters: {exc}")
+            st.error(f"Invalid tier configuration: {exc}")
             st.stop()
 
-        with st.spinner("Running threshold sweep across rolling windows..."):
-            sweep_results = run_parameter_sweep(
-                prices=price_series,
-                base_params=base_params,
-                thresholds=thresholds,
-                deploy_pcts=deploy_pcts_sweep,
-                window_years=window_years,
-                step_months=12,
-                points_per_year=252,
+        with st.spinner(
+            f"Studying {len(episodes)} episodes across {len(thresholds)} thresholds..."
+        ):
+            try:
+                studies = run_event_study(
+                    instrument=instrument_df,
+                    benchmark=benchmark_df,
+                    tiers=tiers,
+                    monthly_contribution=float(monthly_contribution),
+                    opening_reserve=float(opening_reserve),
+                    thresholds=thresholds,
+                    horizon_months=horizon_months,
+                    cash_rate=cash_rate_pct / 100.0 if cash_rate_pct > 0 else None,
+                    pct_fee=pct_fee,
+                    slippage=slippage,
+                )
+                st.session_state["scenarios_event_study"] = {"fp": _fp, "data": studies}
+            except Exception as exc:
+                st.error(f"Event study failed: {exc}")
+                st.stop()
+
+    if studies:
+        rows = []
+        for th in thresholds:
+            s = summarise_threshold(studies, th, horizon_label, policy)
+            if not s["episodes"]:
+                continue
+            rows.append({
+                "Threshold": f"{th:.0%}",
+                "Episodes": s["episodes"],
+                "Still open": s["censored"],
+                "% actually traded": s["pct_episodes_deployed"],
+                "% ahead of DCA": s["pct_ahead_of_dca"],
+                "Median vs DCA": s["median_vs_dca"],
+                "P10 vs DCA": s["p10_vs_dca"],
+                "P90 vs DCA": s["p90_vs_dca"],
+                "Worst vs DCA": s["worst_vs_dca"],
+                "Cash left idle": s["median_undeployed_cash"],
+                "% tiered beat all-in": s["pct_tiered_beat_all_in"],
+                "Median days to recovery": s["median_days_to_recovery"],
+            })
+
+        if not rows:
+            st.info(
+                f"No episode produced a result at the **{horizon_label}** horizon. "
+                "Shorter horizons or a wider date range will yield more observations."
             )
-            st.session_state["scenarios_sweep_cache"] = {"fp": _sweep_fp, "data": sweep_results}
+        else:
+            summary_df = pd.DataFrame(rows)
+            st.subheader(f"{policy} vs month-end DCA — measured at {horizon_label}")
+            st.dataframe(
+                summary_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "% actually traded": st.column_config.NumberColumn(format="%.0f%%"),
+                    "% ahead of DCA": st.column_config.NumberColumn(format="%.0f%%"),
+                    "Median vs DCA": st.column_config.NumberColumn(format="%.2f%%"),
+                    "P10 vs DCA": st.column_config.NumberColumn(format="%.2f%%"),
+                    "P90 vs DCA": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Worst vs DCA": st.column_config.NumberColumn(format="%.2f%%"),
+                    "Cash left idle": st.column_config.NumberColumn(format="%.0f%%"),
+                    "% tiered beat all-in": st.column_config.NumberColumn(format="%.0f%%"),
+                },
+            )
+            st.warning(
+                "**Read '% actually traded' first.** A threshold deeper than the "
+                "horizon reaches may never fire, and a policy that never fires is "
+                "just a savings account — which beats DCA in any falling market. "
+                "Where that column is low, the result reflects *avoiding* the market "
+                "rather than *buying* it well."
+            )
+            st.caption(
+                "Values are fractions relative to month-end DCA over the same window "
+                "with identical contributions. 'Still open' counts episodes whose "
+                "all-time high was never reclaimed. 'Cash left idle' is the median "
+                "share of ending wealth still uninvested. A small episode count means "
+                "the percentiles are indicative only."
+            )
 
-    if sweep_results:
-        sweep_df = sweep_to_dataframe(sweep_results)
-        st.subheader("Win rate vs monthly DCA")
-        st.caption(
-            "Fraction of rolling windows where the dip strategy ended ahead of DCA. "
-            f"Window size: {window_years} years."
-        )
-        wr_pivot = win_rate_pivot(sweep_df)
-        fig_wr = plot_sweep_heatmap(
-            wr_pivot,
-            title="Win rate vs DCA (fraction of windows)",
-            colorscale="RdYlGn",
-            zmin=0.0,
-            zmax=1.0,
-        )
-        st.plotly_chart(fig_wr, width="stretch")
+            with st.expander("Per-episode detail"):
+                detail = []
+                for s in studies:
+                    if s.threshold != thresholds[0]:
+                        continue
+                    rel = s.relative_to_dca(policy, horizon_label)
+                    detail.append({
+                        "ATH date": s.episode.ath_date.date(),
+                        "Signal date": s.signal_date.date(),
+                        "Trough": s.episode.trough_drawdown,
+                        "Recovered": not s.episode.is_censored,
+                        f"{policy} vs DCA": rel,
+                    })
+                if detail:
+                    st.dataframe(pd.DataFrame(detail), width="stretch", hide_index=True)
+                    st.caption(f"Shown for the {thresholds[0]:.0%} threshold.")
 
-        st.subheader("Median outperformance vs DCA")
-        op_pivot = outperformance_pivot(sweep_df)
-        fig_op = plot_sweep_heatmap(
-            op_pivot,
-            title="Median outperformance vs DCA",
-            colorscale="RdYlGn",
-        )
-        st.plotly_chart(fig_op, width="stretch")
+# ---------------------------------------------------------------------------
+# Tab 2: episode log
+# ---------------------------------------------------------------------------
+with tab_episodes:
+    st.markdown(
+        f"Every independent episode found in **{signal_label}**. Each row is one "
+        "all-time high, the drawdown that followed, and whether that high was "
+        "reclaimed."
+    )
+    ep_df = episodes_to_dataframe(episodes)
+    st.dataframe(
+        ep_df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Trough drawdown": st.column_config.NumberColumn(format="%.2f%%"),
+            "ATH level": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
 
-        with st.expander("Raw sweep data"):
-            st.dataframe(sweep_df, width="stretch")
+    st.subheader("First crossings per episode")
+    cross_rows = []
+    for ep in episodes:
+        row: dict[str, object] = {"ATH date": ep.ath_date.date()}
+        for th in thresholds:
+            dt = ep.first_crossings.get(th)
+            row[f"{th:.0%}"] = dt.date() if dt is not None else None
+        cross_rows.append(row)
+    st.dataframe(pd.DataFrame(cross_rows), width="stretch", hide_index=True)
+    st.caption(
+        "Only the first crossing of each threshold within an episode is recorded, "
+        "so a long crash contributes one observation rather than one per day."
+    )
 
 st.divider()
 st.caption(DISCLAIMER_SHORT)

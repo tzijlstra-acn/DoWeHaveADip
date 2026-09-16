@@ -182,6 +182,7 @@ def run_savings_only(
         params.monthly_contribution,
         params.payday,
         pd.DatetimeIndex(trading_days),
+        timing=params.contribution_timing,
     )
     invest_map: dict[pd.Timestamp, float] = {}
     for _, row in schedule.iterrows():
@@ -326,6 +327,7 @@ def run_dip_deployment(
         params.monthly_contribution,
         params.payday,
         pd.DatetimeIndex(trading_days),
+        timing=params.contribution_timing,
     )
     invest_map: dict[pd.Timestamp, float] = {}
     for _, row in schedule.iterrows():
@@ -569,6 +571,7 @@ def run_ath_deployment(
         params.monthly_contribution,
         params.payday,
         pd.DatetimeIndex(trading_days),
+        timing=params.contribution_timing,
     )
     invest_map: dict[pd.Timestamp, float] = {}
     for _, row in schedule.iterrows():
@@ -785,6 +788,7 @@ def run_dca(
         params.monthly_contribution,
         params.payday,
         trading_days,
+        timing=params.contribution_timing,
     )
 
     invest_map: dict[pd.Timestamp, float] = {}
@@ -917,6 +921,7 @@ def run_wait_for_dip(
         params.monthly_contribution,
         params.payday,
         trading_days,
+        timing=params.contribution_timing,
     )
 
     invest_map: dict[pd.Timestamp, float] = {}
@@ -1126,6 +1131,7 @@ def run_tiered_dip(
         params.monthly_contribution,
         params.payday,
         trading_days,
+        timing=params.contribution_timing,
     )
 
     invest_map: dict[pd.Timestamp, float] = {}
