@@ -105,36 +105,64 @@ if not has_benchmark:
 # ---------------------------------------------------------------------------
 svc = get_market_data_service()
 
+# The opening ATH must come from history strictly BEFORE simulation_start.
+# Fetching only the evaluation window and taking .max() leaks future data:
+# day 1 would be compared against a peak reached years later.
+BENCHMARK_LOOKBACK_YEARS = 20
+history_start = start_date - datetime.timedelta(days=365 * BENCHMARK_LOOKBACK_YEARS)
+
+start_ts = pd.Timestamp(start_date)
+end_ts = pd.Timestamp(end_date)
+
 with st.spinner(f"Loading {selected_name} data..."):
     try:
         # Always load the investable instrument (ETF)
-        _inst_result = svc.get_history(etf_symbol, start_date, end_date)
-        price_df = _inst_result.frame
+        _inst_result = svc.get_history(etf_symbol, history_start, end_date)
+        instrument_full = _inst_result.frame
 
         # Load benchmark index for ATH / drawdown signal when available
         if has_benchmark:
-            _bm_result = svc.get_history(index_symbol, start_date, end_date)
-            benchmark_df: pd.DataFrame | None = _bm_result.frame
-            initial_ath = float(benchmark_df["adj_close"].max())
+            _bm_result = svc.get_history(index_symbol, history_start, end_date)
+            benchmark_full: pd.DataFrame | None = _bm_result.frame
             freshness_caption(_bm_result.freshness)
         else:
-            benchmark_df = None
-            initial_ath = None
+            benchmark_full = None
             freshness_caption(_inst_result.freshness)
 
     except LiveDataUnavailable as exc:
         live_data_error(exc, context=selected_name)
         st.stop()
 
-start_ts = pd.Timestamp(start_date)
-end_ts = pd.Timestamp(end_date)
-price_df = price_df.loc[start_ts:end_ts]
-if benchmark_df is not None:
-    benchmark_df = benchmark_df.loc[start_ts:end_ts]
+price_df = instrument_full.loc[start_ts:end_ts]
+
+# Seed the ATH from pre-simulation history only. The engine must never see
+# the evaluation window's own maximum as its opening peak.
+_ath_source = benchmark_full if benchmark_full is not None else instrument_full
+_pre_start = _ath_source.loc[_ath_source.index < start_ts]
+initial_ath: float | None = (
+    float(_pre_start["adj_close"].max()) if not _pre_start.empty else None
+)
+benchmark_history_first = _ath_source.index.min() if len(_ath_source) else None
+ath_is_complete = not _pre_start.empty
+
+benchmark_df = benchmark_full.loc[start_ts:end_ts] if benchmark_full is not None else None
 
 if len(price_df) < 10:
     st.error("Not enough data in the selected date range. Try a wider range.")
     st.stop()
+
+if not ath_is_complete:
+    st.info(
+        f"No benchmark history available before {start_date}. The opening all-time high "
+        "will be established from the first day of the evaluation window, so early "
+        "drawdowns are measured against the highest close observed since data begins."
+    )
+elif benchmark_history_first is not None:
+    st.caption(
+        f"Opening ATH seeded from history before {start_date}: "
+        f"**{initial_ath:,.2f}** "
+        f"(benchmark data begins {benchmark_history_first.date()})"
+    )
 
 # ---------------------------------------------------------------------------
 # Derived benchmark signal series for "Decision today"
@@ -260,50 +288,109 @@ with tab_today:
         tiers_valid = False
         today_tiers = []
 
-    if tiers_valid and today_tiers and cash_available > 0:
-        # Find the next tier that would fire
-        next_tier = next(
-            (t for t in today_tiers if current_dd <= t.drawdown_threshold), None
+    if tiers_valid and today_tiers:
+        # Tier classification.
+        #   reached          : drawdown is at or deeper than the tier threshold
+        #   unreached_deeper : tier threshold is deeper than the current drawdown
+        # At -20% with tiers -15/-25/-35:
+        #   reached = [-15], unreached_deeper = [-25, -35]
+        # Thresholds are negative, so "deeper" means more negative.
+        reached = [t for t in today_tiers if current_dd <= t.drawdown_threshold]
+        unreached_deeper = [t for t in today_tiers if t.drawdown_threshold < current_dd]
+
+        deepest_reached = (
+            min(reached, key=lambda t: t.drawdown_threshold) if reached else None
         )
-        already_fired = [t for t in today_tiers if current_dd > t.drawdown_threshold]
+        next_deeper = (
+            max(unreached_deeper, key=lambda t: t.drawdown_threshold)
+            if unreached_deeper
+            else None
+        )
 
         st.divider()
+        st.markdown("**Where you stand in the tier schedule**")
+
+        # The current drawdown alone cannot reveal whether the investor actually
+        # executed the shallower tiers, so episode state must be supplied.
+        already_deployed = st.number_input(
+            "Principal already deployed during this ATH episode (EUR)",
+            min_value=0.0,
+            max_value=10_000_000.0,
+            value=0.0,
+            step=100.0,
+            help=(
+                "How much you have already invested since the benchmark last set an "
+                "all-time high. Required to compute what is still owed at the tier "
+                "you have reached — the drawdown alone cannot tell us."
+            ),
+        )
+
+        eligible_capital = float(cash_available) + already_deployed
+
         col_s1, col_s2 = st.columns(2)
 
         with col_s1:
-            if next_tier is None:
-                st.success("All configured tiers have been triggered by the current drawdown.")
+            if deepest_reached is not None:
+                st.error(
+                    f"**{deepest_reached.drawdown_threshold:.0%} tier is reached** — "
+                    f"drawdown {current_dd:.1%} is at or below "
+                    f"{deepest_reached.drawdown_threshold:.0%}. Cumulative target: "
+                    f"**{deepest_reached.cumulative_deployment_fraction:.0%}** of eligible capital."
+                )
             else:
-                dist = current_dd - next_tier.drawdown_threshold  # negative = still to go
-                if current_dd <= next_tier.drawdown_threshold:
-                    st.error(
-                        f"**{next_tier.drawdown_threshold:.0%} tier would trigger NOW** "
-                        f"(drawdown {current_dd:.1%} ≤ threshold {next_tier.drawdown_threshold:.0%})"
-                    )
-                else:
-                    st.info(
-                        f"Next tier: **{next_tier.drawdown_threshold:.0%}** — "
-                        f"needs {abs(dist):.1%} more drawdown from here"
-                    )
+                st.success(
+                    "No tier reached yet. The benchmark has not fallen far enough to "
+                    "trigger the shallowest threshold."
+                )
+
+            if next_deeper is not None:
+                gap = next_deeper.drawdown_threshold - current_dd
+                st.info(
+                    f"Next deeper tier: **{next_deeper.drawdown_threshold:.0%}** "
+                    f"(target {next_deeper.cumulative_deployment_fraction:.0%}) — "
+                    f"needs a further **{abs(gap):.1%}** decline from here."
+                )
+            else:
+                st.caption("All configured tiers have been reached at this drawdown.")
 
         with col_s2:
-            eligible = float(cash_available)
-            # Account for already-triggered fractions (cumulative)
-            already_deployed_fraction = (
-                max((t.cumulative_deployment_fraction for t in already_fired), default=0.0)
+            target_fraction = (
+                deepest_reached.cumulative_deployment_fraction if deepest_reached else 0.0
             )
-            if next_tier is not None:
-                incremental_fraction = (
-                    next_tier.cumulative_deployment_fraction - already_deployed_fraction
+            target_principal = target_fraction * eligible_capital
+            deploy_now = min(
+                float(cash_available),
+                max(0.0, target_principal - already_deployed),
+            )
+
+            st.metric(
+                "Deploy now",
+                fmt_currency(deploy_now),
+                help=(
+                    f"Target {target_fraction:.0%} of {fmt_currency(eligible_capital)} "
+                    f"eligible capital = {fmt_currency(target_principal)}, "
+                    f"less {fmt_currency(already_deployed)} already deployed, "
+                    f"capped at {fmt_currency(float(cash_available))} available cash."
+                ),
+            )
+
+            if next_deeper is not None:
+                next_target = next_deeper.cumulative_deployment_fraction * eligible_capital
+                held_back = max(0.0, float(cash_available) - deploy_now)
+                reserve_for_next = min(
+                    held_back, max(0.0, next_target - target_principal)
                 )
-                amount_next = max(0.0, incremental_fraction * eligible)
                 st.metric(
-                    "Amount at next tier",
-                    fmt_currency(amount_next),
-                    help=f"Incremental deployment if {next_tier.drawdown_threshold:.0%} tier fires.",
+                    f"Reserved for {next_deeper.drawdown_threshold:.0%}",
+                    fmt_currency(reserve_for_next),
+                    help="Cash held back for the next deeper tier if the decline continues.",
                 )
-            else:
-                st.metric("Amount at next tier", "—")
+
+            if cash_available <= 0:
+                st.caption(
+                    "No cash entered above, so nothing can deploy. Enter your waiting "
+                    "cash in the **Cash to deploy** field to size the trade."
+                )
 
     # Drawdown chart
     st.divider()
@@ -373,24 +460,16 @@ with tab_history:
 
         with st.spinner("Running backtests..."):
             try:
-                # ATH deployment — uses benchmark index for signal (or ETF if no index)
-                if has_benchmark:
-                    ath_result, ath_ledger = run_ath_deployment(
-                        instrument_data=price_df,
-                        params=params,
-                        tiers=hist_tiers,
-                        benchmark_data=benchmark_df,
-                        initial_ath=initial_ath,
-                    )
-                else:
-                    # ETF-proxy mode: use ETF as its own benchmark
-                    ath_result, ath_ledger = run_ath_deployment(
-                        instrument_data=price_df,
-                        params=params,
-                        tiers=hist_tiers,
-                        benchmark_data=price_df,
-                        initial_ath=float(price_df["adj_close"].max()),
-                    )
+                # ATH deployment — uses benchmark index for signal (or ETF if no index).
+                # initial_ath is seeded from pre-simulation history in both branches;
+                # passing the evaluation window's own max would leak future data.
+                ath_result, ath_ledger = run_ath_deployment(
+                    instrument_data=price_df,
+                    params=params,
+                    tiers=hist_tiers,
+                    benchmark_data=benchmark_df if has_benchmark else price_df,
+                    initial_ath=initial_ath,
+                )
 
                 # Baseline comparisons
                 dca_result, dca_ledger = run_dca(price_df, params)

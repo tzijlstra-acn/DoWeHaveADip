@@ -1,6 +1,21 @@
-"""Core Pydantic data models for dip-or-dca."""
+"""Core Pydantic data models for dip-or-dca.
 
-from __future__ import annotations
+Deliberately does NOT use ``from __future__ import annotations``.
+
+Under PEP 563 the dataclass field annotations are kept as strings, which sends
+``dataclasses._process_class`` down its ``isinstance(type, str)`` branch into
+``_is_type``. That helper does ``sys.modules.get(cls.__module__).__dict__`` and
+raises ``AttributeError: 'NoneType' object has no attribute '__dict__'`` whenever
+this module is momentarily absent from ``sys.modules`` — which happens on
+Streamlit Cloud when the file watcher invalidates modules during a git pull. The
+failure surfaces later as a misleading ``ImportError: cannot import name
+'DeploymentTier'``.
+
+Evaluating the annotations eagerly keeps them off that code path. Self-referential
+annotations must therefore be quoted (see ``validate_schedule``); a quoted
+*method* annotation is safe because ``_process_class`` only inspects *field*
+annotations.
+"""
 
 from dataclasses import dataclass
 from datetime import date
@@ -35,7 +50,7 @@ class DeploymentTier:
             raise ValueError("cumulative_deployment_fraction must be in (0, 1]")
 
     @staticmethod
-    def validate_schedule(tiers: list[DeploymentTier]) -> None:
+    def validate_schedule(tiers: "list[DeploymentTier]") -> None:
         """Validate a complete tier schedule."""
         if not tiers:
             raise ValueError("At least one tier is required")

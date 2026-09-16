@@ -501,9 +501,10 @@ def run_ath_deployment(
 
     ATH seeding
     -----------
-    ``initial_ath = benchmark_data["adj_close"].max()`` by default.
-    Pass ``initial_ath`` explicitly when you have a pre-simulation historical ATH
-    that is NOT present in the benchmark data slice you are passing.
+    Pass ``initial_ath`` computed from benchmark history strictly BEFORE
+    ``params.start_date``.  When ``initial_ath`` is ``None`` the opening peak is the
+    first aligned benchmark close and grows forward via the expanding max, so a
+    simulation can never see a peak from its own future.
 
     Args:
         instrument_data: ETF / investable instrument prices (execution + valuation).
@@ -512,8 +513,8 @@ def run_ath_deployment(
                descending thresholds).
         benchmark_data: Required reference index. Must have an ``adj_close`` column.
             Raises ``ValueError`` when ``None``.
-        initial_ath: Optional explicit ATH seed. If ``None``, computed as
-            ``float(benchmark_data["adj_close"].max())``.
+        initial_ath: Explicit ATH seed from history before ``params.start_date``.
+            If ``None``, seeded from the first aligned benchmark close.
         market_def: Optional metadata (not used in signal logic; for audit only).
 
     Returns:
@@ -547,15 +548,20 @@ def run_ath_deployment(
     )
 
     # -----------------------------------------------------------------------
-    # Seed ATH BEFORE the loop — Bug 2 fix.
-    # We use the maximum of the ENTIRE benchmark series passed in (which the
-    # caller should include pre-simulation history).  The in-loop logic then
-    # updates bm_running_high whenever the benchmark closes at a new high.
+    # Seed ATH BEFORE the loop.
+    #
+    # `initial_ath` must be derived by the caller from benchmark history strictly
+    # BEFORE params.start_date.  When it is None we seed from the FIRST aligned
+    # close and let the expanding max grow forward through the loop.
+    #
+    # We must NOT fall back to benchmark_data["adj_close"].max(): that is the
+    # maximum over the whole evaluation window, i.e. a future peak.  Seeding with
+    # it would make day 1 appear to be in a deep drawdown against a high reached
+    # years later, marking every tier as crossed before any cash existed.
     # -----------------------------------------------------------------------
-    if initial_ath is not None:
-        bm_running_high = float(initial_ath)
-    else:
-        bm_running_high = float(benchmark_data["adj_close"].max())
+    bm_running_high = (
+        float(initial_ath) if initial_ath is not None else float(bm_aligned.iloc[0])
+    )
 
     schedule = build_contribution_schedule(
         params.start_date,
@@ -600,10 +606,10 @@ def run_ath_deployment(
         )
         cash_flows.append((trading_days[0].date(), -params.initial_cash_reserve))
 
-    # Episode state
-    triggered_tiers: set[int] = set()
+    # Episode state. A tier index lands in `satisfied_tiers` only once its
+    # cumulative target has actually been funded, never merely on a crossing.
+    satisfied_tiers: set[int] = set()
     principal_deployed_in_episode = 0.0
-    prev_drawdown = 0.0
     # Pending: (execute_on_or_after_dt, tier_index, amount)
     pending_executions: list[tuple[pd.Timestamp, int, float]] = []
 
@@ -667,11 +673,12 @@ def run_ath_deployment(
         #    Episode resets ONLY when benchmark closes at or above the previous ATH.
         #    Recovering above a threshold does NOT rearm a tier (Bug 3 fix).
         if bm_close >= bm_running_high:
-            # New ATH: reset episode state
+            # New ATH: reset episode state unconditionally. A partially-funded tier
+            # leaves principal_deployed_in_episode non-zero while satisfied_tiers is
+            # still empty, so this must not be gated on any tier having been funded.
             bm_running_high = bm_close
-            if triggered_tiers:
-                triggered_tiers = set()
-                principal_deployed_in_episode = 0.0
+            satisfied_tiers = set()
+            principal_deployed_in_episode = 0.0
             current_dd = 0.0
         else:
             current_dd = bm_close / bm_running_high - 1.0
@@ -681,46 +688,54 @@ def run_ath_deployment(
         ledger.at[dt, "benchmark_ath"] = bm_running_high
         ledger.at[dt, "benchmark_drawdown"] = current_dd
 
-        # 6. Detect threshold crossings using benchmark drawdown.
-        #    Multi-tier gap fix (Bug 4): collect ALL newly-crossed tiers, pick the
-        #    DEEPEST cumulative target, schedule ONE incremental order.
+        # 6. Deployment obligations from the benchmark drawdown.
         #
-        #    Unlike run_dip_deployment, we allow i=0 to signal a crossing.  When
-        #    initial_ath is seeded from pre-simulation history, prev_drawdown=0.0
-        #    (the "before simulation" reference) and current_dd may already be below
-        #    a threshold on the very first day.  Detecting that crossing on day 0
-        #    schedules execution at day 1 — no look-ahead bias.
-        if True:
-            crossed_tiers = [
-                (j, tier)
-                for j, tier in enumerate(tiers)
-                if j not in triggered_tiers
-                and prev_drawdown > tier.drawdown_threshold >= current_dd
-            ]
-            if crossed_tiers:
-                # Mark ALL crossed tiers as triggered (they are all "consumed")
-                for j, _tier in crossed_tiers:
-                    triggered_tiers.add(j)
+        #    A tier creates an obligation as soon as the drawdown reaches its
+        #    threshold: "have `cumulative_deployment_fraction` of eligible capital
+        #    deployed".  The obligation is tested on the level (dd <= threshold), not
+        #    on the crossing event, and a tier is marked satisfied only once its
+        #    target is genuinely funded.
+        #
+        #    This matters when a tier is reached while the savings balance is empty.
+        #    Consuming the tier on the crossing alone would discard the obligation
+        #    permanently, so every later contribution would sit in cash for the rest
+        #    of the episode. Keeping it outstanding lets contributions fund it as
+        #    they arrive, while a fully-funded tier still never re-fires.
+        #
+        #    Multi-tier gap fix: when one close gaps through several tiers, the
+        #    DEEPEST reached tier sets the cumulative target and ONE order is placed.
+        reached_tiers = [
+            (j, tier)
+            for j, tier in enumerate(tiers)
+            if j not in satisfied_tiers and current_dd <= tier.drawdown_threshold
+        ]
+        if reached_tiers:
+            deepest_j, deepest_tier = min(
+                reached_tiers, key=lambda jt: jt[1].drawdown_threshold
+            )
+            eligible = cash + principal_deployed_in_episode
+            target_total = deepest_tier.cumulative_deployment_fraction * eligible
 
-                # Use ONLY the deepest (most negative threshold) cumulative target
-                deepest_j, deepest_tier = min(
-                    crossed_tiers, key=lambda jt: jt[1].drawdown_threshold
-                )
-                cumulative_target = deepest_tier.cumulative_deployment_fraction
-                eligible = cash + principal_deployed_in_episode
-                target_total = cumulative_target * eligible
-
-                # Account for already-pending (not yet executed) orders
-                pending_total = sum(amt for _, _, amt in pending_executions)
-                incremental = min(
-                    max(0.0, cash - pending_total),
-                    max(0.0, target_total - principal_deployed_in_episode - pending_total),
-                )
-                if incremental > 0 and i + 1 < len(trading_days):
-                    pending_executions.append((trading_days[i + 1], deepest_j, incremental))
+            # Account for already-pending (not yet executed) orders
+            pending_total = sum(amt for _, _, amt in pending_executions)
+            incremental = min(
+                max(0.0, cash - pending_total),
+                max(0.0, target_total - principal_deployed_in_episode - pending_total),
+            )
+            if incremental > 0 and i + 1 < len(trading_days):
+                pending_executions.append((trading_days[i + 1], deepest_j, incremental))
                 ledger.at[dt, "signal_dd"] = current_dd
 
-        prev_drawdown = current_dd
+            # Mark reached tiers satisfied once their target is covered by principal
+            # already deployed plus orders in flight. The `eligible > 0` guard stops
+            # a zero-capital day from trivially satisfying every tier against a
+            # target of zero.
+            if eligible > 0:
+                covered = principal_deployed_in_episode + pending_total + incremental
+                for j, tier in reached_tiers:
+                    if tier.cumulative_deployment_fraction * eligible <= covered + 1e-9:
+                        satisfied_tiers.add(j)
+
         prev_dt = dt
 
     total_contributions = (
