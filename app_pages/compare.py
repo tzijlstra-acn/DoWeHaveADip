@@ -263,16 +263,8 @@ with tab_today:
     st.subheader("Current market signal")
 
     # Current benchmark state
-    peak_series = signal_series.expanding().max()
-    at_peak = signal_series >= peak_series
-    days_since_high = 0
-    for _i in range(len(at_peak) - 1, -1, -1):
-        if at_peak.iloc[_i]:
-            break
-        days_since_high += 1
-
-    # ATH date
     ath_date = signal_series.idxmax()
+    days_since_high = (signal_series.index[-1] - ath_date).days
     ath_val = float(signal_series.max())
 
     col_m1, col_m2, col_m3 = st.columns(3)
@@ -441,7 +433,7 @@ with tab_today:
     # Drawdown chart
     st.divider()
     st.subheader("Drawdown history")
-    fig_dd = drawdown_chart(signal_series, title=f"{selected_name} — Drawdown from High")
+    fig_dd = drawdown_chart(dd_series, title=f"{selected_name} — Drawdown from High")
     st.plotly_chart(fig_dd, width="stretch")
 
 # ===========================================================================
@@ -574,7 +566,7 @@ with tab_history:
         # Drawdown chart (benchmark or ETF)
         with st.expander("Drawdown history (signal source)"):
             fig_dd2 = drawdown_chart(
-                signal_series,
+                dd_series,
                 title=f"{selected_name} — Drawdown from High ({signal_label})",
             )
             st.plotly_chart(fig_dd2, width="stretch")

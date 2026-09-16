@@ -159,7 +159,17 @@ def drawdown_chart(
     title: str = "Drawdown",
     threshold: float | None = None,
 ) -> go.Figure:
-    """Drawdown waterfall chart with optional threshold line."""
+    """Drawdown waterfall chart with optional threshold line.
+
+    Args:
+        series: Drawdown series — values must be ≤ 0. Pass ``drawdown(price_series)``
+                rather than the raw price series.
+    """
+    if series.max() > 0:
+        raise ValueError(
+            "drawdown_chart() received a series with positive values — expected a drawdown "
+            "series (all values ≤ 0). Pass drawdown(price_series) instead of raw prices."
+        )
     fig = go.Figure()
 
     fig.add_trace(

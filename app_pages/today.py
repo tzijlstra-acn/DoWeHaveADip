@@ -116,14 +116,8 @@ current_dd = float(dd_series.iloc[-1])
 # Benchmark ATH date
 ath_date = signal_series.idxmax()
 
-# Days since last all-time high (from the benchmark/index series)
-peak_series = signal_series.expanding().max()
-at_peak = signal_series >= peak_series
-days_since_high = 0
-for i in range(len(at_peak) - 1, -1, -1):
-    if at_peak.iloc[i]:
-        break
-    days_since_high += 1
+# Calendar days since last all-time high (date arithmetic, not row count)
+days_since_high = (signal_series.index[-1] - ath_date).days
 
 # Historical dip frequency at this level (±5%)
 tol = 0.05
@@ -214,7 +208,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.subheader("Drawdown history")
 # Use benchmark/index series for the drawdown chart (the true signal source)
-fig_dd = drawdown_chart(signal_series, title=f"{selected_name} — Drawdown from High ({signal_label})")
+fig_dd = drawdown_chart(dd_series, title=f"{selected_name} — Drawdown from High ({signal_label})")
 st.plotly_chart(fig_dd, width="stretch")
 
 st.divider()

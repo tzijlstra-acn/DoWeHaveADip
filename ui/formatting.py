@@ -17,7 +17,7 @@ def fmt_currency(value: float, currency: str = "EUR", decimals: int = 0) -> str:
     return f"{currency} {value:,.{decimals}f}"
 
 
-def fmt_pct(value: float | None, decimals: int = 1) -> str:
+def fmt_pct(value: float | None, decimals: int = 2) -> str:
     """Format a float as a percentage string."""
     if value is None:
         return "N/A"

@@ -25,12 +25,15 @@ crossings, and the investable instrument supplies execution prices.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import pandas as pd
 
 from dipdca.models import DeploymentTier, SimulationParams
 from dipdca.quant.backtest import run_ath_deployment, run_dca, run_savings_only
+
+logger = logging.getLogger(__name__)
 
 # Thresholds reported by default (negative fractions).
 DEFAULT_THRESHOLDS: tuple[float, ...] = (-0.10, -0.15, -0.20, -0.25, -0.30, -0.35)
@@ -389,8 +392,11 @@ def study_episode(
                     initial_ath=episode.ath_level,
                 )[0])
             )
-        except (ValueError, KeyError):
-            continue
+        except (ValueError, KeyError) as exc:
+            raise RuntimeError(
+                f"study_episode failed for episode at {episode.ath_date.date()}, "
+                f"threshold={threshold}, horizon={label}: {exc}"
+            ) from exc
 
     if not outcomes:
         return None
@@ -447,24 +453,27 @@ def run_event_study(
     studies: list[EpisodeStudy] = []
     for ep in episodes:
         for th in thresholds:
-            study = study_episode(
-                episode=ep,
-                threshold=th,
-                instrument=instrument,
-                benchmark=benchmark,
-                monthly_contribution=monthly_contribution,
-                opening_reserve=opening_reserve,
-                tiers=tiers,
-                horizon_months=horizon_months,
-                cash_rate=cash_rate,
-                fixed_fee=fixed_fee,
-                pct_fee=pct_fee,
-                slippage=slippage,
-                baseline_cache=baseline_cache,
-                anchor=anchor,
-            )
-            if study is not None:
-                studies.append(study)
+            try:
+                study = study_episode(
+                    episode=ep,
+                    threshold=th,
+                    instrument=instrument,
+                    benchmark=benchmark,
+                    monthly_contribution=monthly_contribution,
+                    opening_reserve=opening_reserve,
+                    tiers=tiers,
+                    horizon_months=horizon_months,
+                    cash_rate=cash_rate,
+                    fixed_fee=fixed_fee,
+                    pct_fee=pct_fee,
+                    slippage=slippage,
+                    baseline_cache=baseline_cache,
+                    anchor=anchor,
+                )
+                if study is not None:
+                    studies.append(study)
+            except RuntimeError as exc:
+                logger.warning("Skipping episode (threshold=%s): %s", th, exc)
     return studies
 
 
