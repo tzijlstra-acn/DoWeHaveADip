@@ -131,17 +131,37 @@ if not has_benchmark:
 # ---------------------------------------------------------------------------
 # Load market data — benchmark drives the signal, ETF supplies execution prices
 # ---------------------------------------------------------------------------
+# Load 20 years before start_date so that the opening ATH is a genuine
+# pre-window high, not the first bar of the evaluation window.
+BENCHMARK_LOOKBACK_YEARS = 20
+_history_start = start_date - datetime.timedelta(days=365 * BENCHMARK_LOOKBACK_YEARS)
+_start_ts = pd.Timestamp(start_date)
+
 with st.spinner(f"Loading {selected_name} data..."):
     try:
         _inst_result = get_market_data_service().get_history(etf_symbol, start_date, end_date)
         instrument_df = _inst_result.frame
 
         if has_benchmark:
-            _bm_result = get_market_data_service().get_history(index_symbol, start_date, end_date)
-            benchmark_df = _bm_result.frame
-            freshness_caption(_bm_result.freshness)
+            _bm_full_result = get_market_data_service().get_history(
+                index_symbol, _history_start, end_date
+            )
+            _bm_full = _bm_full_result.frame
+            freshness_caption(_bm_full_result.freshness)
+            # Pre-window history: compute the ATH before the evaluation window
+            _pre_start = _bm_full.loc[_bm_full.index < _start_ts]
+            if len(_pre_start) > 0:
+                _initial_ath = float(_pre_start["adj_close"].max())
+                _initial_ath_date = pd.Timestamp(_pre_start["adj_close"].idxmax())
+            else:
+                _initial_ath = None
+                _initial_ath_date = None
+            # Evaluation window only
+            benchmark_df = _bm_full.loc[_bm_full.index >= _start_ts]
         else:
             benchmark_df = instrument_df
+            _initial_ath = None
+            _initial_ath_date = None
             freshness_caption(_inst_result.freshness)
     except LiveDataUnavailable as exc:
         live_data_error(exc, context=selected_name)
@@ -158,7 +178,12 @@ current_dd = float(drawdown(bm_series).iloc[-1])
 # ---------------------------------------------------------------------------
 # Episodes
 # ---------------------------------------------------------------------------
-episodes = find_ath_episodes(bm_series, thresholds=thresholds)
+episodes = find_ath_episodes(
+    bm_series,
+    thresholds=thresholds,
+    initial_ath=_initial_ath,
+    initial_ath_date=_initial_ath_date,
+)
 recovered = [e for e in episodes if not e.is_censored]
 censored = [e for e in episodes if e.is_censored]
 
@@ -280,6 +305,9 @@ with tab_summary:
                     cash_rate=cash_rate_pct / 100.0 if cash_rate_pct > 0 else None,
                     pct_fee=pct_fee,
                     slippage=slippage,
+                    anchor="execution",
+                    initial_ath=_initial_ath,
+                    initial_ath_date=_initial_ath_date,
                 )
                 st.session_state["scenarios_event_study"] = {"fp": _fp, "data": studies}
             except Exception as exc:
@@ -292,18 +320,21 @@ with tab_summary:
             s = summarise_threshold(studies, th, horizon_label, policy)
             if not s["episodes"]:
                 continue
+            def _pct(v):
+                return v * 100 if v is not None else None
+
             rows.append({
                 "Threshold": f"{th:.0%}",
                 "Episodes": s["episodes"],
                 "Still open": s["censored"],
-                "% actually traded": s["pct_episodes_deployed"],
-                "% ahead of DCA": s["pct_ahead_of_dca"],
-                "Median vs DCA": s["median_vs_dca"],
-                "P10 vs DCA": s["p10_vs_dca"],
-                "P90 vs DCA": s["p90_vs_dca"],
-                "Worst vs DCA": s["worst_vs_dca"],
-                "Cash left idle": s["median_undeployed_cash"],
-                "% tiered beat all-in": s["pct_tiered_beat_all_in"],
+                "% actually traded": _pct(s["pct_episodes_deployed"]),
+                "% ahead of DCA": _pct(s["pct_ahead_of_dca"]),
+                "Median vs DCA": _pct(s["median_vs_dca"]),
+                "P10 vs DCA": _pct(s["p10_vs_dca"]),
+                "P90 vs DCA": _pct(s["p90_vs_dca"]),
+                "Worst vs DCA": _pct(s["worst_vs_dca"]),
+                "Cash left idle": _pct(s["median_undeployed_cash"]),
+                "% tiered beat all-in": _pct(s["pct_tiered_beat_all_in"]),
                 "Median days to recovery": s["median_days_to_recovery"],
             })
 

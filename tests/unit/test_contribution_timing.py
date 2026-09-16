@@ -72,8 +72,10 @@ class TestMonthEnd:
 
         assert list(df["contribution_date"]) == list(df["invest_date"])
 
-    def test_month_end_never_exceeds_the_window(self):
-        """A partial final month contributes on its last trading day in range."""
+    def test_month_end_excludes_partial_final_month(self):
+        """A partial final month (end date March 16) must NOT produce a March
+        contribution.  Only calendar-complete months are included — the March
+        month-end (March 31) is outside the window so March is skipped."""
         idx = trading_days("2020-01-01", "2020-03-16")
 
         df = build_contribution_schedule(
@@ -81,7 +83,10 @@ class TestMonthEnd:
         )
         got = [d.date() for d in df["invest_date"]]
 
-        assert got[-1] == date(2020, 3, 16)
+        # Only January and February are complete months in this window
+        assert len(got) == 2
+        assert date(2020, 1, 31) in got
+        assert date(2020, 2, 28) in got
         assert all(d <= date(2020, 3, 16) for d in got)
 
 

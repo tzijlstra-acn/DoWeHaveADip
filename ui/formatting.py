@@ -5,6 +5,13 @@ from __future__ import annotations
 from datetime import date
 
 
+def fraction_to_pct(value: float | None, decimals: int = 2) -> str:
+    """Convert a fraction (0.041) to a percentage string ('4.10%')."""
+    if value is None:
+        return "N/A"
+    return f"{value * 100:.{decimals}f}%"
+
+
 def fmt_currency(value: float, currency: str = "EUR", decimals: int = 0) -> str:
     """Format a number as currency."""
     return f"{currency} {value:,.{decimals}f}"

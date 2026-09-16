@@ -75,6 +75,8 @@ def find_ath_episodes(
     benchmark: pd.Series,
     thresholds: tuple[float, ...] = DEFAULT_THRESHOLDS,
     min_depth: float | None = None,
+    initial_ath: float | None = None,
+    initial_ath_date: pd.Timestamp | None = None,
 ) -> list[ATHEpisode]:
     """Identify independent ATH episodes in a benchmark close series.
 
@@ -84,6 +86,12 @@ def find_ath_episodes(
         min_depth: Discard episodes shallower than this (negative fraction).
             Defaults to the shallowest supplied threshold, so an episode is only
             reported once it is deep enough to be a decision point.
+        initial_ath: Seed the opening all-time high from pre-window history.
+            When provided, the episode detection starts with this as the peak
+            rather than the first value in the series.  Use this to avoid the
+            first bar of the evaluation window being treated as a new ATH.
+        initial_ath_date: Date corresponding to ``initial_ath``.  Ignored when
+            ``initial_ath`` is ``None``.
 
     Returns:
         Episodes in chronological order. A trailing censored episode is included
@@ -98,8 +106,16 @@ def find_ath_episodes(
 
     episodes: list[ATHEpisode] = []
 
-    peak = float(series.iloc[0])
-    peak_date = pd.Timestamp(series.index[0])
+    if initial_ath is not None:
+        peak = float(initial_ath)
+        peak_date = (
+            pd.Timestamp(initial_ath_date)
+            if initial_ath_date is not None
+            else pd.Timestamp(series.index[0]) - pd.Timedelta(days=1)
+        )
+    else:
+        peak = float(series.iloc[0])
+        peak_date = pd.Timestamp(series.index[0])
 
     open_episode = False
     anchor_level = peak
@@ -222,9 +238,18 @@ def episode_windows(
     episode: ATHEpisode,
     trading_index: pd.DatetimeIndex,
     horizon_months: tuple[int, ...],
+    anchor_date: pd.Timestamp | None = None,
 ) -> list[tuple[str, pd.Timestamp]]:
-    """Measurement windows for an episode: fixed horizons plus ATH recovery."""
-    anchor = episode.ath_date
+    """Measurement windows for an episode: fixed horizons plus ATH recovery.
+
+    Args:
+        episode: The episode to build windows for.
+        trading_index: Sorted trading-day index of the instrument.
+        horizon_months: Fixed calendar-month horizons to compute.
+        anchor_date: Start of the measurement window.  Defaults to the episode
+            ATH date when ``None``.
+    """
+    anchor = anchor_date if anchor_date is not None else episode.ath_date
     out: list[tuple[str, pd.Timestamp]] = []
     for m in horizon_months:
         end = _window_end(anchor, m, trading_index)
@@ -250,11 +275,19 @@ def study_episode(
     slippage: float = 0.0,
     baseline_cache: dict[tuple[pd.Timestamp, pd.Timestamp], list[PolicyOutcome]]
     | None = None,
+    anchor: str = "ath",
 ) -> EpisodeStudy | None:
     """Compare policies within one episode at one threshold.
 
-    The evaluation window opens at the episode's anchor ATH, so the opening peak
-    is the anchor level — a genuine pre-window high, never a future maximum.
+    The evaluation window opens at the episode's anchor ATH (``anchor="ath"``)
+    or at the signal / execution date (``anchor="signal"`` or
+    ``anchor="execution"``).
+
+    Args:
+        anchor: Where to anchor the measurement windows.
+            ``"ath"``       — start at the episode's all-time-high date (default).
+            ``"signal"``    — start at the first crossing of ``threshold``.
+            ``"execution"`` — start at the first trading day *after* the signal.
 
     ``baseline_cache`` memoises the threshold-independent policies (savings-only
     and DCA) per window, since they would otherwise be recomputed for every
@@ -266,9 +299,25 @@ def study_episode(
     if signal_date is None:
         return None
 
-    anchor = episode.ath_date
+    ath_date = episode.ath_date
+    trading_idx = pd.DatetimeIndex(instrument.index)
+
+    # Resolve the anchor date for horizon windows
+    if anchor == "ath":
+        anchor_date = ath_date
+    elif anchor == "signal":
+        anchor_date = signal_date
+    elif anchor == "execution":
+        # First trading day strictly after signal_date
+        pos = trading_idx.searchsorted(signal_date, side="right")
+        if pos >= len(trading_idx):
+            return None
+        anchor_date = pd.Timestamp(trading_idx[int(pos)])
+    else:
+        raise ValueError(f"anchor must be 'ath', 'signal', or 'execution'; got {anchor!r}")
+
     windows = episode_windows(
-        episode, pd.DatetimeIndex(instrument.index), horizon_months
+        episode, trading_idx, horizon_months, anchor_date=anchor_date
     )
     if not windows:
         return None
@@ -277,8 +326,8 @@ def study_episode(
     outcomes: list[PolicyOutcome] = []
 
     for label, window_end in windows:
-        inst_window = instrument.loc[anchor:window_end]
-        bm_window = benchmark.loc[anchor:window_end]
+        inst_window = instrument.loc[anchor_date:window_end]
+        bm_window = benchmark.loc[anchor_date:window_end]
         if len(inst_window) < 2 or len(bm_window) < 2:
             continue
 
@@ -288,7 +337,7 @@ def study_episode(
             contribution_timing="month_end",
             initial_investment=0.0,
             initial_cash_reserve=opening_reserve,
-            start_date=anchor.date(),
+            start_date=anchor_date.date(),
             end_date=window_end.date(),
             dip_threshold=threshold,
             fixed_fee=fixed_fee,
@@ -297,7 +346,7 @@ def study_episode(
             cash_rate_override=cash_rate,
         )
 
-        key = (anchor, window_end)
+        key = (anchor_date, window_end)
         cached = baseline_cache.get(key) if baseline_cache is not None else None
         try:
             if cached is None:
@@ -366,14 +415,30 @@ def run_event_study(
     fixed_fee: float = 0.0,
     pct_fee: float = 0.0,
     slippage: float = 0.0,
+    anchor: str = "ath",
+    initial_ath: float | None = None,
+    initial_ath_date: pd.Timestamp | None = None,
 ) -> list[EpisodeStudy]:
-    """Run the full event study across every episode and threshold."""
+    """Run the full event study across every episode and threshold.
+
+    Args:
+        anchor: Horizon measurement anchor — ``"ath"``, ``"signal"``, or
+            ``"execution"``.  See :func:`study_episode` for details.
+        initial_ath: Seed the opening all-time high from pre-window history.
+            Passed through to :func:`find_ath_episodes`.
+        initial_ath_date: Date for ``initial_ath``.
+    """
     if "adj_close" not in benchmark.columns:
         raise ValueError("benchmark must have an 'adj_close' column")
     if "adj_close" not in instrument.columns:
         raise ValueError("instrument must have an 'adj_close' column")
 
-    episodes = find_ath_episodes(benchmark["adj_close"], thresholds=thresholds)
+    episodes = find_ath_episodes(
+        benchmark["adj_close"],
+        thresholds=thresholds,
+        initial_ath=initial_ath,
+        initial_ath_date=initial_ath_date,
+    )
 
     # Savings-only and DCA do not depend on the threshold, so they are computed
     # once per (episode, window) and shared across thresholds.
@@ -396,6 +461,7 @@ def run_event_study(
                 pct_fee=pct_fee,
                 slippage=slippage,
                 baseline_cache=baseline_cache,
+                anchor=anchor,
             )
             if study is not None:
                 studies.append(study)

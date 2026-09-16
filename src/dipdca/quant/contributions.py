@@ -94,22 +94,39 @@ def monthly_boundary_trading_days(
     trading_index: pd.DatetimeIndex,
     which: Literal["last", "first"],
 ) -> pd.DatetimeIndex:
-    """Select the last (or first) trading day of each month in the window.
+    """Select the last (or first) trading day of each *complete* month in the window.
 
-    Chosen from ``trading_index`` itself, so the result is always a real trading
-    day. A month whose only trading days fall outside the window is skipped.
+    For ``which="last"``: generates calendar month-ends (``freq="ME"``) within
+    ``[start_date, end_date]``, then maps each to the nearest trading day on or
+    before it.  A partial final month (e.g. ending March 16) is therefore
+    excluded, because March 31 falls outside the window.
+
+    For ``which="first"``: generates calendar month-starts (``freq="MS"``), then
+    maps each to the nearest trading day on or after it.
+
+    The result is always a real trading day from ``trading_index``.
     """
-    in_window = trading_index[
-        (trading_index >= pd.Timestamp(start_date)) & (trading_index <= pd.Timestamp(end_date))
-    ]
-    if len(in_window) == 0:
-        return pd.DatetimeIndex([])
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
 
-    grouped = pd.Series(in_window, index=in_window).groupby(
-        [in_window.year, in_window.month]
-    )
-    picked = grouped.last() if which == "last" else grouped.first()
-    return pd.DatetimeIndex(sorted(picked.values))
+    if which == "last":
+        # Calendar month-ends strictly within the window
+        month_ends = pd.date_range(start=start_ts, end=end_ts, freq="ME")
+        result = []
+        for me in month_ends:
+            eligible = trading_index[trading_index <= me]
+            if len(eligible) > 0 and eligible[-1] >= start_ts:
+                result.append(pd.Timestamp(eligible[-1]))
+        return pd.DatetimeIndex(sorted(set(result)))
+
+    # which == "first"
+    month_starts = pd.date_range(start=start_ts, end=end_ts, freq="MS")
+    result = []
+    for ms in month_starts:
+        eligible = trading_index[trading_index >= ms]
+        if len(eligible) > 0 and eligible[0] <= end_ts:
+            result.append(pd.Timestamp(eligible[0]))
+    return pd.DatetimeIndex(sorted(set(result)))
 
 
 def build_contribution_schedule(
