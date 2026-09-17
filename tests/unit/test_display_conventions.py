@@ -83,7 +83,7 @@ class TestFractionToPercent:
             opening_reserve=10_000.0,
             thresholds=(-0.20,),
             horizon_months=(6,),
-        )
+        ).studies
         s = summarise_threshold(studies, -0.20, "6m", "ATH all-in")
 
         # Raw values from summarise_threshold are fractions (0-1)
@@ -218,7 +218,7 @@ class TestHorizonAnchor:
         vals = [100.0] + [70.0] * 60 + [130.0] * 60
         inst = frame(vals)
         # Should not raise TypeError
-        studies = run_event_study(
+        result = run_event_study(
             instrument=inst,
             benchmark=inst,
             tiers=[DeploymentTier(-0.20, 1.00)],
@@ -228,7 +228,7 @@ class TestHorizonAnchor:
             horizon_months=(6,),
             anchor="execution",
         )
-        assert isinstance(studies, list)
+        assert isinstance(result.studies, list)
 
 
 # ---------------------------------------------------------------------------

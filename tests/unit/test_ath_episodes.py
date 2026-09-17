@@ -275,7 +275,7 @@ class TestEventStudy:
             opening_reserve=10_000.0,
             thresholds=THRESHOLDS,
             horizon_months=(12,),
-        )
+        ).studies
 
         # -30% is never reached, so only -10% and -20% yield studies.
         assert {s.threshold for s in studies} == {-0.10, -0.20}
@@ -307,7 +307,7 @@ class TestEventStudy:
             horizon_months=(12,),
         )
 
-        cached = run_event_study(**kw)
+        cached = run_event_study(**kw).studies
 
         # Recompute each study with no cache at all.
         episodes = find_ath_episodes(inst["adj_close"], thresholds=THRESHOLDS)
@@ -354,7 +354,7 @@ class TestEventStudy:
             opening_reserve=10_000.0,
             thresholds=(-0.20,),
             horizon_months=(6,),
-        )
+        ).studies
         fired = summarise_threshold(studies, -0.20, "6m", "ATH all-in")
 
         assert fired["pct_episodes_deployed"] == 1.0
@@ -374,7 +374,7 @@ class TestEventStudy:
             opening_reserve=10_000.0,
             thresholds=(-0.20,),
             horizon_months=(6,),
-        )
+        ).studies
         summary = summarise_threshold(studies, -0.20, "6m", "Savings only")
 
         assert summary["pct_episodes_deployed"] == 0.0
@@ -398,7 +398,7 @@ class TestEventStudy:
             opening_reserve=10_000.0,
             thresholds=(-0.20,),
             horizon_months=(6,),
-        )
+        ).studies
         summary = summarise_threshold(studies, -0.20, "6m")
 
         assert summary["episodes"] == 1

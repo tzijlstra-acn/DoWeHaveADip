@@ -212,6 +212,27 @@ class EpisodeStudy:
         return mine / dca - 1.0
 
 
+@dataclass(frozen=True)
+class FailedEpisode:
+    """A threshold study that raised an exception during run_event_study."""
+
+    episode: ATHEpisode
+    threshold: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class EventStudyResult:
+    """Return value from run_event_study.
+
+    Separates successful studies from episodes that raised exceptions, so that
+    partial failures are visible to callers rather than being silently dropped.
+    """
+
+    studies: list[EpisodeStudy]
+    failures: list[FailedEpisode]
+
+
 def _window_end(
     anchor: pd.Timestamp,
     months: int,
@@ -305,17 +326,26 @@ def study_episode(
     ath_date = episode.ath_date
     trading_idx = pd.DatetimeIndex(instrument.index)
 
-    # Resolve the anchor date for horizon windows
+    # Resolve the anchor date (for horizon-window measurement) and sim_start
+    # (the date from which the simulation data is sliced, which must include
+    # the threshold-crossing so that the pending order can carry to T+1).
     if anchor == "ath":
         anchor_date = ath_date
+        sim_start = ath_date
     elif anchor == "signal":
         anchor_date = signal_date
+        sim_start = signal_date
     elif anchor == "execution":
-        # First trading day strictly after signal_date
+        # Horizon windows are measured from the first trading day after the signal.
         pos = trading_idx.searchsorted(signal_date, side="right")
         if pos >= len(trading_idx):
             return None
         anchor_date = pd.Timestamp(trading_idx[int(pos)])
+        # Simulation must start at signal_date so the pending order placed at
+        # the crossing carries through to the execution day (T+1).  Starting at
+        # anchor_date (T+1) loses the crossing event when the benchmark has
+        # already rebounded above the threshold by then.
+        sim_start = signal_date
     else:
         raise ValueError(f"anchor must be 'ath', 'signal', or 'execution'; got {anchor!r}")
 
@@ -329,8 +359,8 @@ def study_episode(
     outcomes: list[PolicyOutcome] = []
 
     for label, window_end in windows:
-        inst_window = instrument.loc[anchor_date:window_end]
-        bm_window = benchmark.loc[anchor_date:window_end]
+        inst_window = instrument.loc[sim_start:window_end]
+        bm_window = benchmark.loc[sim_start:window_end]
         if len(inst_window) < 2 or len(bm_window) < 2:
             continue
 
@@ -340,7 +370,7 @@ def study_episode(
             contribution_timing="month_end",
             initial_investment=0.0,
             initial_cash_reserve=opening_reserve,
-            start_date=anchor_date.date(),
+            start_date=sim_start.date(),
             end_date=window_end.date(),
             dip_threshold=threshold,
             fixed_fee=fixed_fee,
@@ -349,7 +379,7 @@ def study_episode(
             cash_rate_override=cash_rate,
         )
 
-        key = (anchor_date, window_end)
+        key = (sim_start, window_end)
         cached = baseline_cache.get(key) if baseline_cache is not None else None
         try:
             if cached is None:
@@ -424,7 +454,7 @@ def run_event_study(
     anchor: str = "ath",
     initial_ath: float | None = None,
     initial_ath_date: pd.Timestamp | None = None,
-) -> list[EpisodeStudy]:
+) -> EventStudyResult:
     """Run the full event study across every episode and threshold.
 
     Args:
@@ -433,6 +463,11 @@ def run_event_study(
         initial_ath: Seed the opening all-time high from pre-window history.
             Passed through to :func:`find_ath_episodes`.
         initial_ath_date: Date for ``initial_ath``.
+
+    Returns:
+        ``EventStudyResult`` with ``.studies`` (successful episodes) and
+        ``.failures`` (episodes that raised an exception).  Callers must access
+        ``.studies`` — the return value is no longer a bare ``list``.
     """
     if "adj_close" not in benchmark.columns:
         raise ValueError("benchmark must have an 'adj_close' column")
@@ -451,6 +486,7 @@ def run_event_study(
     baseline_cache: dict[tuple[pd.Timestamp, pd.Timestamp], list[PolicyOutcome]] = {}
 
     studies: list[EpisodeStudy] = []
+    failures: list[FailedEpisode] = []
     for ep in episodes:
         for th in thresholds:
             try:
@@ -474,7 +510,8 @@ def run_event_study(
                     studies.append(study)
             except RuntimeError as exc:
                 logger.warning("Skipping episode (threshold=%s): %s", th, exc)
-    return studies
+                failures.append(FailedEpisode(episode=ep, threshold=th, reason=str(exc)))
+    return EventStudyResult(studies=studies, failures=failures)
 
 
 def summarise_threshold(
@@ -598,3 +635,57 @@ def summary_to_dataframe(
         summarise_threshold(studies, th, horizon_label, policy) for th in thresholds
     ]
     return pd.DataFrame([r for r in rows if r["episodes"]])
+
+
+# ---------------------------------------------------------------------------
+# Helper selectors
+# ---------------------------------------------------------------------------
+
+
+def episodes_for_threshold(
+    studies: list[EpisodeStudy],
+    threshold: float,
+) -> list[EpisodeStudy]:
+    """Return only the episodes that were run at the given threshold level."""
+    return [s for s in studies if s.threshold == threshold]
+
+
+def winning_episodes(
+    studies: list[EpisodeStudy],
+    threshold: float,
+    horizon_label: str,
+    policy: str = "ATH all-in",
+) -> list[EpisodeStudy]:
+    """Episodes where *policy* outperformed DCA AND actually deployed capital.
+
+    An episode is included only when:
+
+    - ``relative_to_dca(policy, horizon_label) > 0`` (policy beat DCA), AND
+    - ``n_deployments > 0`` for the matching outcome (the strategy executed a
+      trade; not winning by sitting in cash).
+
+    Args:
+        studies: Full output of ``run_event_study``.
+        threshold: Drawdown threshold to filter on.
+        horizon_label: Horizon label (e.g. ``"12m"``).
+        policy: Policy to evaluate against DCA.
+
+    Returns:
+        Subset of studies that are genuine policy wins.
+    """
+    result: list[EpisodeStudy] = []
+    for s in episodes_for_threshold(studies, threshold):
+        rel = s.relative_to_dca(policy, horizon_label)
+        if rel is None or rel <= 0:
+            continue
+        n_dep = next(
+            (
+                o.n_deployments
+                for o in s.outcomes
+                if o.policy == policy and o.horizon_label == horizon_label
+            ),
+            0,
+        )
+        if n_dep > 0:
+            result.append(s)
+    return result

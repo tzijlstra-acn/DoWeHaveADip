@@ -28,6 +28,35 @@ def drawdown(series: pd.Series) -> pd.Series:
     return series / peak - 1
 
 
+def seeded_drawdown(series: pd.Series, initial_ath: float) -> pd.Series:
+    """Drawdown relative to a pre-seeded all-time high.
+
+    Like :func:`drawdown`, but the running peak starts at ``initial_ath``
+    rather than the first value in ``series``.  Use this when the benchmark
+    history before the evaluation window is known: callers should pass the
+    ATH from that pre-window period so that the displayed drawdown is
+    consistent with the engine's own calculation (which also seeds the ATH).
+
+    Args:
+        series: Price series (or benchmark close series), sorted ascending.
+        initial_ath: The all-time high from before the series window.  When
+            the series contains values exceeding ``initial_ath``, the peak
+            updates to those values.
+
+    Returns:
+        Drawdown series with the same index as ``series``.  Values are ≤ 0;
+        0.0 means a new all-time high relative to the seeded peak.
+    """
+    seeded = pd.concat(
+        [pd.Series([initial_ath], index=[series.index[0] - pd.Timedelta(days=1)]), series]
+    )
+    seeded_peak = seeded.expanding().max()
+    # Drop the synthetic seed row so the result aligns with the original index
+    peak_aligned = seeded_peak.iloc[1:]
+    peak_aligned.index = series.index
+    return series / peak_aligned - 1
+
+
 def max_drawdown(series: pd.Series) -> float:
     """Return maximum (deepest) drawdown as a negative fraction."""
     dd = drawdown(series)

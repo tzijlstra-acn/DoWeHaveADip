@@ -316,7 +316,7 @@ with tab_summary:
             f"Studying {len(episodes)} episodes across {len(thresholds)} thresholds..."
         ):
             try:
-                studies = run_event_study(
+                event_study_result = run_event_study(
                     instrument=instrument_df,
                     benchmark=benchmark_df,
                     tiers=tiers,
@@ -331,6 +331,7 @@ with tab_summary:
                     initial_ath=_initial_ath,
                     initial_ath_date=_initial_ath_date,
                 )
+                studies = event_study_result.studies
                 st.session_state["scenarios_event_study"] = {"fp": _fp, "data": studies}
             except Exception as exc:
                 st.error(f"Event study failed: {exc}")

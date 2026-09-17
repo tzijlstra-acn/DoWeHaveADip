@@ -80,8 +80,16 @@ def _filter_eligible(
     threshold: float,
     horizon_label: str,
     policy: str,
+    executed_only: bool = False,
 ) -> list[EpisodeStudy]:
-    """Return only studies that have paired, non-None outcomes for policy and DCA."""
+    """Return only studies that have paired, non-None outcomes for policy and DCA.
+
+    Args:
+        executed_only: When ``True``, also exclude episodes where the policy
+            never deployed capital (``n_deployments == 0``).  This avoids
+            inflating the win-rate with episodes where the strategy "won" by
+            sitting in cash rather than buying the dip.
+    """
     eligible = []
     for s in studies:
         if s.threshold != threshold:
@@ -90,6 +98,17 @@ def _filter_eligible(
         pol_w = s.wealth(policy, horizon_label)
         if dca_w is None or pol_w is None or dca_w <= 0:
             continue
+        if executed_only:
+            n_dep = next(
+                (
+                    o.n_deployments
+                    for o in s.outcomes
+                    if o.policy == policy and o.horizon_label == horizon_label
+                ),
+                0,
+            )
+            if n_dep == 0:
+                continue
         eligible.append(s)
     return eligible
 
@@ -107,6 +126,7 @@ def bootstrap_win_rate(
     n_boot: int = DEFAULT_N_BOOT,
     ci_level: float = DEFAULT_CI_LEVEL,
     seed: int | None = 42,
+    executed_only: bool = False,
 ) -> BootstrapResult | None:
     """Bootstrap confidence interval on the win rate of ``policy`` vs DCA.
 
@@ -121,11 +141,13 @@ def bootstrap_win_rate(
         n_boot: Number of bootstrap resamples.
         ci_level: Confidence level (default 0.95 → 95% CI).
         seed: RNG seed for reproducibility.
+        executed_only: When ``True``, exclude episodes where the policy never
+            deployed capital.  See :func:`_filter_eligible` for details.
 
     Returns:
         ``BootstrapResult`` or ``None`` if the pool is too small.
     """
-    eligible = _filter_eligible(studies, threshold, horizon_label, policy)
+    eligible = _filter_eligible(studies, threshold, horizon_label, policy, executed_only)
     n = len(eligible)
     if n < 2:
         return None
